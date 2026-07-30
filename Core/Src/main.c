@@ -46,8 +46,6 @@ DMA_NodeTypeDef Node_GPDMA1_Channel0;
 DMA_QListTypeDef List_GPDMA1_Channel0;
 DMA_HandleTypeDef handle_GPDMA1_Channel0;
 
-DAC_HandleTypeDef hdac1;
-
 FDCAN_HandleTypeDef hfdcan1;
 
 I2C_HandleTypeDef hi2c2;
@@ -58,7 +56,8 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-
+/* 进入 Error_Handler 时的返回地址，GDB 可 Watch；再用 addr2line 定位调用点 */
+volatile uint32_t g_error_lr;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,7 +66,6 @@ void MX_FREERTOS_Init(void);
 static void MX_GPIO_Init(void);
 static void MX_GPDMA1_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_DAC1_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_FDCAN1_Init(void);
 static void MX_TIM2_Init(void);
@@ -111,11 +109,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_GPDMA1_Init();
-  MX_ADC1_Init();
-  MX_DAC1_Init();
-  MX_I2C2_Init();
-  MX_FDCAN1_Init();
+  /* ADC/I2C/FDCAN 暂跳过：主板还未供电，会进 Error_Handler */
+  /* MX_GPDMA1_Init(); */
+  /* MX_ADC1_Init(); */
+  /* MX_I2C2_Init(); */
+  /* MX_FDCAN1_Init(); */
   MX_TIM2_Init();
   MX_TIM4_Init();
   MX_USART1_UART_Init();
@@ -154,7 +152,7 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the System Power Supply
-   *  优先 SMPS；失败则回退 LDO，避免启动卡死
+   *  Prefer SMPS; fall back to LDO if board has no SMPS path.
    */
   if (HAL_PWREx_ConfigSupply(PWR_SMPS_SUPPLY) != HAL_OK)
   {
@@ -187,11 +185,8 @@ void SystemClock_Config(void)
   __HAL_FLASH_SET_LATENCY(FLASH_LATENCY_2);
 
   /** Initializes the CPU, AHB and APB buses clocks
-   *  不依赖外部 HSE（无 16MHz 晶振时 OscConfig 会失败并卡死）
-   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_MSIS;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
-  RCC_OscInitStruct.LSIDiv = RCC_LSI_DIV1;
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSIS;
   RCC_OscInitStruct.MSISState = RCC_MSI_ON;
   RCC_OscInitStruct.MSISSource = RCC_MSI_RC0;
   RCC_OscInitStruct.MSISDiv = RCC_MSI_DIV1;
@@ -343,69 +338,6 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
-  * @brief DAC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_DAC1_Init(void)
-{
-
-  /* USER CODE BEGIN DAC1_Init 0 */
-
-  /* USER CODE END DAC1_Init 0 */
-
-  DAC_ChannelConfTypeDef sConfig = {0};
-  DAC_AutonomousModeConfTypeDef sAutonomousMode = {0};
-
-  /* USER CODE BEGIN DAC1_Init 1 */
-
-  /* USER CODE END DAC1_Init 1 */
-
-  /** DAC Initialization
-  */
-  hdac1.Instance = DAC1;
-  if (HAL_DAC_Init(&hdac1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** DAC channel OUT1 config
-  */
-  sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_DISABLE;
-  sConfig.DAC_DMADoubleDataMode = DISABLE;
-  sConfig.DAC_SignedFormat = DISABLE;
-  sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
-  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
-  sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
-  sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
-  if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Autonomous Mode
-  */
-  sAutonomousMode.AutonomousModeState = DAC_AUTONOMOUS_MODE_DISABLE;
-  if (HAL_DACEx_SetConfigAutonomousMode(&hdac1, &sAutonomousMode) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** DAC channel OUT2 config
-  */
-  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_DISABLE;
-  if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN DAC1_Init 2 */
-
-  /* USER CODE END DAC1_Init 2 */
 
 }
 
@@ -817,6 +749,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  g_error_lr = (uint32_t)__builtin_return_address(0);
   __disable_irq();
   while (1)
   {

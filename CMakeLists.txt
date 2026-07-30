@@ -44,13 +44,14 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    Core/Src/bsp_buzzer.c
-    Core/Src/bsp_ws2812.c
+    User_APP/src/app_freertos.c
+    User_APP/src/bsp_buzzer.c
+    User_APP/src/bsp_ws2812.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    Core/Inc
+    User_APP/inc
 )
 
 # Add project symbols (macros)
