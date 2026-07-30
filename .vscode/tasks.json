@@ -1,0 +1,181 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Sync compile_commands.json",
+            "type": "shell",
+            "command": "cp",
+            "args": [
+                "${workspaceFolder}/${config:bms.buildDir}/compile_commands.json",
+                "${workspaceFolder}/compile_commands.json"
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Configure firmware (arm-none-eabi)",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "cmake -S \"${workspaceFolder}\" -B \"${workspaceFolder}/${config:bms.buildDir}\" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE=\"${workspaceFolder}/cmake/gcc-arm-none-eabi.cmake\" && cp \"${workspaceFolder}/${config:bms.buildDir}/compile_commands.json\" \"${workspaceFolder}/compile_commands.json\""
+            ],
+            "options": {
+                "env": {
+                    "PATH": "${config:bms.armToolchainBin}:${env:PATH}",
+                    "CFLAGS": "",
+                    "CXXFLAGS": "",
+                    "CPPFLAGS": "",
+                    "LDFLAGS": "",
+                    "ASMFLAGS": "",
+                    "CMAKE_ARGS": ""
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "showReuseMessage": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build firmware inc (arm-none-eabi)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/${config:bms.buildDir}",
+                "--target",
+                "${config:bms.targetName}",
+                "--parallel"
+            ],
+            "options": {
+                "env": {
+                    "PATH": "${config:bms.armToolchainBin}:${env:PATH}",
+                    "CFLAGS": "",
+                    "CXXFLAGS": "",
+                    "CPPFLAGS": "",
+                    "LDFLAGS": "",
+                    "ASMFLAGS": "",
+                    "CMAKE_ARGS": ""
+                }
+            },
+            "dependsOn": "Configure firmware (arm-none-eabi)",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "showReuseMessage": false
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build firmware full (arm-none-eabi)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/${config:bms.buildDir}",
+                "--target",
+                "${config:bms.targetName}",
+                "--parallel",
+                "--clean-first"
+            ],
+            "options": {
+                "env": {
+                    "PATH": "${config:bms.armToolchainBin}:${env:PATH}",
+                    "CFLAGS": "",
+                    "CXXFLAGS": "",
+                    "CPPFLAGS": "",
+                    "LDFLAGS": "",
+                    "ASMFLAGS": "",
+                    "CMAKE_ARGS": ""
+                }
+            },
+            "dependsOn": "Configure firmware (arm-none-eabi)",
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "showReuseMessage": false
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Flash firmware (J-Link)",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "${workspaceFolder}/tools/win_debug/flash_current_elf.sh",
+                "${workspaceFolder}",
+                "${config:bms.jlinkExe}",
+                "${config:bms.jlinkDevice}",
+                "${workspaceFolder}/${config:bms.buildDir}/${config:bms.targetName}.elf"
+            ],
+            "options": {
+                "env": {
+                    "PATH": "${config:bms.armToolchainBin}:${env:PATH}"
+                }
+            },
+            "dependsOn": "Build firmware inc (arm-none-eabi)",
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "showReuseMessage": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Start J-Link GDB Server",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "${workspaceFolder}/.vscode/start-jlink-gdbserver.sh",
+                "${workspaceFolder}",
+                "${config:bms.jlinkGdbServerCli}",
+                "${config:bms.jlinkDevice}",
+                "${config:bms.jlinkGdbPort}",
+                "${config:bms.jlinkSwoPort}",
+                "${config:bms.jlinkTelnetPort}",
+                "${config:bms.jlinkRtosPlugin}"
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "focus": false,
+                "panel": "dedicated",
+                "showReuseMessage": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Start J-Link GDB Server (Inc Build)",
+            "dependsOn": [
+                "Build firmware inc (arm-none-eabi)",
+                "Start J-Link GDB Server"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Start J-Link GDB Server (Full Build)",
+            "dependsOn": [
+                "Build firmware full (arm-none-eabi)",
+                "Start J-Link GDB Server"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        }
+    ]
+}

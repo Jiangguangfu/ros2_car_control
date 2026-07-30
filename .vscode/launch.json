@@ -1,0 +1,59 @@
+{
+    // Path variables are defined in .vscode/settings.json.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "J-Link Flash + GDB Debug (Inc Build)",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/${config:bms.buildDir}/${config:bms.targetName}.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "external",
+            "gdbTarget": "localhost:${config:bms.jlinkGdbPort}",
+            "armToolchainPath": "${config:bms.armToolchainBin}",
+            "gdbPath": "${config:bms.gdbPath}",
+            "device": "${config:bms.jlinkDevice}",
+            "interface": "swd",
+            "rtos": "FreeRTOS",
+            "preLaunchTask": "Start J-Link GDB Server (Inc Build)",
+            "runToEntryPoint": "main",
+            "internalConsoleOptions": "openOnSessionStart",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "J-Link Flash + GDB Debug (Full Build)",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/${config:bms.buildDir}/${config:bms.targetName}.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "external",
+            "gdbTarget": "localhost:${config:bms.jlinkGdbPort}",
+            "armToolchainPath": "${config:bms.armToolchainBin}",
+            "gdbPath": "${config:bms.gdbPath}",
+            "device": "${config:bms.jlinkDevice}",
+            "interface": "swd",
+            "rtos": "FreeRTOS",
+            "preLaunchTask": "Start J-Link GDB Server (Full Build)",
+            "runToEntryPoint": "main",
+            "internalConsoleOptions": "openOnSessionStart",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "J-Link Attach",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/${config:bms.buildDir}/${config:bms.targetName}.elf",
+            "request": "attach",
+            "type": "cortex-debug",
+            "servertype": "external",
+            "gdbTarget": "localhost:${config:bms.jlinkGdbPort}",
+            "armToolchainPath": "${config:bms.armToolchainBin}",
+            "gdbPath": "${config:bms.gdbPath}",
+            "device": "${config:bms.jlinkDevice}",
+            "interface": "swd",
+            "rtos": "FreeRTOS",
+            "preLaunchTask": "Start J-Link GDB Server",
+            "internalConsoleOptions": "openOnSessionStart",
+            "showDevDebugOutput": "none"
+        }
+    ]
+}

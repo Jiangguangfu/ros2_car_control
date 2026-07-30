@@ -1,0 +1,22 @@
+{
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": [
+        "--background-index",
+        "--clang-tidy=false",
+        "--header-insertion=never",
+        "--query-driver=/usr/bin/arm-none-eabi-gcc"
+    ],
+
+    "bms.armToolchainBin": "/usr/bin",
+    "bms.gdbPath": "/usr/bin/gdb-multiarch",
+    "bms.jlinkGdbServerCli": "/mnt/c/Program Files/SEGGER/JLink_V910/JLinkGDBServerCL.exe",
+    "bms.jlinkExe": "/mnt/c/Program Files/SEGGER/JLink_V910/JLink.exe",
+
+    "bms.buildDir": "build/Debug",
+    "bms.targetName": "BMS_Project",
+    "bms.jlinkDevice": "STM32U385CG",
+    "bms.jlinkGdbPort": "2331",
+    "bms.jlinkSwoPort": "2332",
+    "bms.jlinkTelnetPort": "2333",
+    "bms.jlinkRtosPlugin": "GDBServer/RTOSPlugin_FreeRTOS"
+}

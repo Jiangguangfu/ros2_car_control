@@ -1,0 +1,26 @@
+# Build
+build/
+**/build/
+cmake-build-*/
+compile_commands.json
+.cache/
+
+# Large vendor dumps / archives (not needed for app build)
+STM32Cube_FW_U3_V1.3.0/
+Packs/
+*.zip
+
+# CubeMX / IDE junk ads
+ad*.png
+ads.xml
+en.stm32h5cubemxbanner.png
+
+# Debug / flash logs
+**/jlink*.log
+**/jlink_flash.jlink
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
