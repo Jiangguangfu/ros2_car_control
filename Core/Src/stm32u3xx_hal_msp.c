@@ -105,8 +105,9 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
   /** Initializes the peripherals clock
   */
     PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADCDAC;
+    /* 不用 HSE：与 SystemClock_Config 一致，避免无晶振时 ADC 初始化失败 */
     PeriphClkInit.AdcDacClockSelection = RCC_ADCDACCLKSOURCE_HCLK;
-    PeriphClkInit.AdcDacClockDivider = RCC_ADCDACCLK_DIV4;
+    PeriphClkInit.AdcDacClockDivider = RCC_ADCDACCLK_DIV1;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
     {
       Error_Handler();
@@ -246,6 +247,86 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
     /* USER CODE BEGIN ADC1_MspDeInit 1 */
 
     /* USER CODE END ADC1_MspDeInit 1 */
+  }
+
+}
+
+/**
+  * @brief DAC MSP Initialization
+  * This function configures the hardware resources used in this example
+  * @param hdac: DAC handle pointer
+  * @retval None
+  */
+void HAL_DAC_MspInit(DAC_HandleTypeDef* hdac)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+  if(hdac->Instance==DAC1)
+  {
+    /* USER CODE BEGIN DAC1_MspInit 0 */
+
+    /* USER CODE END DAC1_MspInit 0 */
+
+  /** Initializes the peripherals clock
+  */
+    PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_DAC1SH;
+    PeriphClkInit.Dac1SampleHoldClockSelection = RCC_DAC1SHCLKSOURCE_LSI;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    /* Peripheral clock enable */
+    __HAL_RCC_DAC1_CLK_ENABLE();
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    /**DAC1 GPIO Configuration
+    PA4     ------> DAC1_OUT1
+    PA5     ------> DAC1_OUT2
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    /* DAC1 interrupt Init */
+    HAL_NVIC_SetPriority(DAC1_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(DAC1_IRQn);
+    /* USER CODE BEGIN DAC1_MspInit 1 */
+
+    /* USER CODE END DAC1_MspInit 1 */
+
+  }
+
+}
+
+/**
+  * @brief DAC MSP De-Initialization
+  * This function freeze the hardware resources used in this example
+  * @param hdac: DAC handle pointer
+  * @retval None
+  */
+void HAL_DAC_MspDeInit(DAC_HandleTypeDef* hdac)
+{
+  if(hdac->Instance==DAC1)
+  {
+    /* USER CODE BEGIN DAC1_MspDeInit 0 */
+
+    /* USER CODE END DAC1_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_DAC1_CLK_DISABLE();
+
+    /**DAC1 GPIO Configuration
+    PA4     ------> DAC1_OUT1
+    PA5     ------> DAC1_OUT2
+    */
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_4|GPIO_PIN_5);
+
+    /* DAC1 interrupt DeInit */
+    HAL_NVIC_DisableIRQ(DAC1_IRQn);
+    /* USER CODE BEGIN DAC1_MspDeInit 1 */
+
+    /* USER CODE END DAC1_MspDeInit 1 */
   }
 
 }
