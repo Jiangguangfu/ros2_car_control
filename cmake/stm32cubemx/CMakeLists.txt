@@ -11,6 +11,7 @@ set(MX_Defines_Syms
 # STM32CubeMX generated include paths
 set(MX_Include_Dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../User_APP/inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Inc/Legacy
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/Device/ST/STM32U3xx/Include
@@ -24,7 +25,6 @@ set(MX_Include_Dirs
 # STM32CubeMX generated application sources
 set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/main.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/app_freertos.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/stm32u3xx_it.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/stm32u3xx_hal_msp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/stm32u3xx_hal_timebase_tim.c
@@ -54,8 +54,6 @@ set(STM32_Drivers_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_pwr_ex.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_gtzc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_icache.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_dac.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_dac_ex.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_fdcan.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_i2c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32U3xx_HAL_Driver/Src/stm32u3xx_hal_i2c_ex.c

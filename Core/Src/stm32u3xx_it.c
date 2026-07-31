@@ -59,7 +59,6 @@ extern DMA_NodeTypeDef Node_GPDMA1_Channel0;
 extern DMA_QListTypeDef List_GPDMA1_Channel0;
 extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 extern ADC_HandleTypeDef hadc1;
-extern DAC_HandleTypeDef hdac1;
 extern FDCAN_HandleTypeDef hfdcan1;
 extern I2C_HandleTypeDef hi2c2;
 extern UART_HandleTypeDef huart1;
@@ -221,20 +220,6 @@ void ADC1_IRQHandler(void)
   /* USER CODE BEGIN ADC1_IRQn 1 */
 
   /* USER CODE END ADC1_IRQn 1 */
-}
-
-/**
-  * @brief This function handles DAC1 global interrupt.
-  */
-void DAC1_IRQHandler(void)
-{
-  /* USER CODE BEGIN DAC1_IRQn 0 */
-
-  /* USER CODE END DAC1_IRQn 0 */
-  HAL_DAC_IRQHandler(&hdac1);
-  /* USER CODE BEGIN DAC1_IRQn 1 */
-
-  /* USER CODE END DAC1_IRQn 1 */
 }
 
 /**

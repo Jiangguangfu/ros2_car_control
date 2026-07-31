@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_buzzer.h"
-#include "bsp_ws2812.h"
+#include "main.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -153,10 +153,20 @@ void StartCommonTaskCommon(void *argument)
 void StartServiceTask(void *argument)
 {
   /* USER CODE BEGIN ServiceTask */
+  /* 打开外设供电（蜂鸣器若挂在这些轨上） */
+  HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
+  osDelay(100);
+
+  /* 开机提示：蜂鸣器响三声 */
+  for (int i = 0; i < 3; i++) {
+    BSP_Buzzer_Beep(200);
+    osDelay(150);
+  }
+
   /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
+  for (;;) {
+    osDelay(1000);
   }
   /* USER CODE END ServiceTask */
 }
