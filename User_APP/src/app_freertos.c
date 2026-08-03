@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_buzzer.h"
+#include "bsp_fan.h"
 #include "bq76942.h"
 #include "thermal_manager.h"
 #include "main.h"
@@ -170,9 +171,13 @@ void StartServiceTask(void *argument)
   /* USER CODE BEGIN ServiceTask */
   static uint32_t count_heartbeat = 0;
   static uint32_t tick_after = 0;
-  /* 打开外设供电（蜂鸣器若挂在这些轨上） */
+  /* 打开外设供电 */
   HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
+  /* PB4: 19V rail enable */
+  HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
+  /* PC13: 24V Bypass Control */
+  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
   osDelay(100);
 
   /* 开机提示：蜂鸣器响三声 */
@@ -224,6 +229,7 @@ void StartPowerTask(void *argument)
 void StartBmsTask(void *argument)
 {
   /* USER CODE BEGIN BmsTask */
+  static bool s_dsg_enabled = false;
   (void)argument;
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
@@ -240,6 +246,12 @@ void StartBmsTask(void *argument)
     {
       s_bq_temp.valid = false;
       s_bq_temp_fail_count++;
+    }
+
+    /* 同时：PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
+    if (!s_dsg_enabled)
+    {
+      s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
     }
 
     osDelay(500);

@@ -447,11 +447,29 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
     /* USER CODE END TIM4_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_TIM4_CLK_ENABLE();
+    __HAL_RCC_TIM4_CLK_SLEEP_ENABLE();
     /* USER CODE BEGIN TIM4_MspInit 1 */
 
     /* USER CODE END TIM4_MspInit 1 */
   }
 
+}
+
+/**
+  * @brief TIM_PWM MSP Initialization
+  * @note  HAL_TIM_PWM_Init() 只回调本函数（State==RESET 时），不走 Base_MspInit。
+  */
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim)
+{
+  if (htim->Instance == TIM4)
+  {
+    __HAL_RCC_TIM4_CLK_ENABLE();
+    __HAL_RCC_TIM4_CLK_SLEEP_ENABLE();
+  }
+  else if (htim->Instance == TIM2)
+  {
+    __HAL_RCC_TIM2_CLK_ENABLE();
+  }
 }
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
