@@ -58,6 +58,13 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 /* 进入 Error_Handler 时的返回地址，GDB 可 Watch；再用 addr2line 定位调用点 */
 volatile uint32_t g_error_lr;
+/* osKernelStart() 返回值：正常不应返回。GDB Watch 此变量 */
+volatile osStatus_t g_kernel_start_status = osOK;
+volatile osStatus_t g_kernel_init_status = osOK;
+/* osErrorISR 诊断：调用前 IPSR/PRIMASK/BASEPRI（线程模式且未屏蔽时应为 0） */
+volatile uint32_t g_ipsr_before_kernel;
+volatile uint32_t g_primask_before_kernel;
+volatile uint32_t g_basepri_before_kernel;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -109,10 +116,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  /* ADC/I2C/FDCAN 暂跳过：主板还未供电，会进 Error_Handler */
+  /* ADC/FDCAN 暂跳过：相关外设未联调 */
   /* MX_GPDMA1_Init(); */
   /* MX_ADC1_Init(); */
-  /* MX_I2C2_Init(); */
+  MX_I2C2_Init(); /* BQ76942 on I2C2 (PB13/PB14) */
   /* MX_FDCAN1_Init(); */
   MX_TIM2_Init();
   MX_TIM4_Init();

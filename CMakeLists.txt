@@ -47,6 +47,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/app_freertos.c
     User_APP/src/bsp_buzzer.c
     User_APP/src/bsp_ws2812.c
+    User_APP/src/bq76942.c
+    User_APP/src/bsp_fan.c
+    User_APP/src/thermal_manager.c
 )
 
 # Add include paths

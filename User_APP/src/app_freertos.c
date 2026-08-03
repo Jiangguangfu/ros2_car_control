@@ -23,7 +23,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_buzzer.h"
+#include "bq76942.h"
+#include "thermal_manager.h"
 #include "main.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,6 +46,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+extern I2C_HandleTypeDef hi2c2;
+
+static bq76942_temp_t s_bq_temp;
+static uint32_t s_bq_temp_fail_count;
 
 /* USER CODE END Variables */
 /* Definitions for CommTask */
@@ -76,7 +83,15 @@ const osThreadAttr_t BmsTask_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+const bq76942_temp_t *Bms_GetBqTemperatures(void)
+{
+  return &s_bq_temp;
+}
 
+uint32_t Bms_GetBqTempFailCount(void)
+{
+  return s_bq_temp_fail_count;
+}
 /* USER CODE END FunctionPrototypes */
 
 /**
@@ -153,6 +168,8 @@ void StartCommonTaskCommon(void *argument)
 void StartServiceTask(void *argument)
 {
   /* USER CODE BEGIN ServiceTask */
+  static uint32_t count_heartbeat = 0;
+  static uint32_t tick_after = 0;
   /* 打开外设供电（蜂鸣器若挂在这些轨上） */
   HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
@@ -160,12 +177,14 @@ void StartServiceTask(void *argument)
 
   /* 开机提示：蜂鸣器响三声 */
   for (int i = 0; i < 3; i++) {
-    BSP_Buzzer_Beep(200);
+    //BSP_Buzzer_Beep(200);
     osDelay(150);
   }
 
   /* Infinite loop */
   for (;;) {
+    tick_after = HAL_GetTick();
+    count_heartbeat++;
     osDelay(1000);
   }
   /* USER CODE END ServiceTask */
@@ -181,10 +200,16 @@ void StartServiceTask(void *argument)
 void StartPowerTask(void *argument)
 {
   /* USER CODE BEGIN PowerTask */
-  /* Infinite loop */
-  for(;;)
+  (void)argument;
+
+  /* Wait for rails + first BQ samples from BmsTask. */
+  osDelay(500);
+  Thermal_Init();
+
+  for (;;)
   {
-    osDelay(1);
+    Thermal_Process();
+    osDelay(200);
   }
   /* USER CODE END PowerTask */
 }
@@ -199,10 +224,25 @@ void StartPowerTask(void *argument)
 void StartBmsTask(void *argument)
 {
   /* USER CODE BEGIN BmsTask */
-  /* Infinite loop */
-  for(;;)
+  (void)argument;
+
+  /* Wait for power rails (ServiceTask enables 7V5/12V). */
+  osDelay(300);
+
+  for (;;)
   {
-    osDelay(1);
+    if (BQ76942_ReadTemperatures(&hi2c2, &s_bq_temp))
+    {
+      s_bq_temp_fail_count = 0U;
+      /* Int/TS1/TS2: *_temp_c_x10 (°C*10); TS3=SW2 → ts3_adcin_mv */
+    }
+    else
+    {
+      s_bq_temp.valid = false;
+      s_bq_temp_fail_count++;
+    }
+
+    osDelay(500);
   }
   /* USER CODE END BmsTask */
 }

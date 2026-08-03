@@ -49,7 +49,8 @@ _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 _sstack = _estack - _Min_Stack_Size;
 
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
-_Min_Stack_Size = 0x400; /* required amount of stack */
+/* MSPLIM=_estack-_Min_Stack_Size；启动阶段 HAL+TIM6 同用 MSP，1KB 过紧 */
+_Min_Stack_Size = 0x1000; /* required amount of stack */
 
 /* Sections */
 SECTIONS

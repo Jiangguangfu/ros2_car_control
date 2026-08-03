@@ -32,7 +32,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bq76942.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -61,7 +61,8 @@ extern osThreadId_t BmsTaskHandle;
 
 /* Exported function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
+const bq76942_temp_t *Bms_GetBqTemperatures(void);
+uint32_t Bms_GetBqTempFailCount(void);
 /* USER CODE END FunctionPrototypes */
 
 void StartCommonTaskCommon(void *argument);
