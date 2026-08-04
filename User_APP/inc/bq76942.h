@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    bq76942.h
- * @brief   BQ76942 I2C helpers: temperature, FET/DSG enable for 24V output.
+ * @brief   BQ76942 I2C helpers: temperature, cells, FET, passive balance.
  *
  * Schematic (BQ76942PBR):
  *   TS1/TS2 — NTC; TS3 — SW2
@@ -19,16 +19,26 @@
 extern "C" {
 #endif
 
+#define BQ76942_MAX_CELLS                 16U
+
 /* Datasheet / TRM: 8-bit write address 0x10 (7-bit 0x08). HAL uses 7-bit << 1. */
 #define BQ76942_I2C_ADDR_HAL              0x10U
 
 /* Direct commands */
 #define BQ76942_CMD_BATTERY_STATUS        0x12U
+#define BQ76942_CMD_CELL1_VOLTAGE         0x14U
+#define BQ76942_CMD_STACK_VOLTAGE         0x34U
+#define BQ76942_CMD_CC2_CURRENT           0x3AU
+#define BQ76942_CMD_CB_ACTIVE_CELLS       0x83U
 #define BQ76942_CMD_FET_STATUS            0x7FU
 #define BQ76942_CMD_INT_TEMP              0x68U
 #define BQ76942_CMD_TS1_TEMP              0x70U
 #define BQ76942_CMD_TS2_TEMP              0x72U
 #define BQ76942_CMD_TS3_TEMP              0x74U
+
+#define BQ76942_CMD_SAFETY_STATUS_A       0x05U
+#define BQ76942_CMD_SAFETY_STATUS_B       0x06U
+#define BQ76942_CMD_SAFETY_STATUS_C       0x07U
 
 /* Subcommand mailbox */
 #define BQ76942_REG_CMD_LOW               0x3EU
@@ -62,6 +72,14 @@ typedef struct
   bool valid;
 } bq76942_temp_t;
 
+typedef struct
+{
+  uint16_t cell_mv[BQ76942_MAX_CELLS];
+  uint16_t stack_mv;
+  uint8_t cell_count;
+  bool valid;
+} bq76942_cells_t;
+
 bool BQ76942_IsReady(I2C_HandleTypeDef *hi2c);
 bool BQ76942_ReadTempRaw(I2C_HandleTypeDef *hi2c, uint8_t cmd, int16_t *raw);
 bool BQ76942_ReadTemperatures(I2C_HandleTypeDef *hi2c, bq76942_temp_t *out);
@@ -69,6 +87,14 @@ bool BQ76942_ReadTemperatures(I2C_HandleTypeDef *hi2c, bq76942_temp_t *out);
 bool BQ76942_SubCommandWrite(I2C_HandleTypeDef *hi2c, uint16_t subcmd);
 bool BQ76942_SubCommandReadU16(I2C_HandleTypeDef *hi2c, uint16_t subcmd, uint16_t *value);
 bool BQ76942_ReadFetStatus(I2C_HandleTypeDef *hi2c, uint8_t *fet_status);
+
+bool BQ76942_ReadCellVoltages(I2C_HandleTypeDef *hi2c, uint8_t cell_count,
+                              bq76942_cells_t *out);
+bool BQ76942_ReadPackCurrent(I2C_HandleTypeDef *hi2c, int16_t *current_ma);
+bool BQ76942_ReadBatteryStatus(I2C_HandleTypeDef *hi2c, uint16_t *status);
+bool BQ76942_ReadSafetyStatus(I2C_HandleTypeDef *hi2c, bool *protect_active);
+bool BQ76942_SetBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t mask);
+bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask);
 
 /**
  * Release MCU DFETOFF/CFETOFF, exit FET Test mode if needed, ALL_FETS_ON.
@@ -79,6 +105,11 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c);
 static inline int16_t BQ76942_Temp0p1KToCx10(int16_t temp_0p1k)
 {
   return (int16_t)(temp_0p1k - 2732);
+}
+
+static inline uint8_t BQ76942_CellVoltageCmd(uint8_t cell_index)
+{
+  return (uint8_t)(BQ76942_CMD_CELL1_VOLTAGE + (cell_index * 2U));
 }
 
 #ifdef __cplusplus

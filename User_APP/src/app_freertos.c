@@ -25,6 +25,7 @@
 #include "bsp_buzzer.h"
 #include "bsp_fan.h"
 #include "bq76942.h"
+#include "cell_balance_manager.h"
 #include "thermal_manager.h"
 #include "main.h"
 
@@ -51,6 +52,7 @@ extern I2C_HandleTypeDef hi2c2;
 
 static bq76942_temp_t s_bq_temp;
 static uint32_t s_bq_temp_fail_count;
+static uint32_t s_bq_comm_fail_count;
 
 /* USER CODE END Variables */
 /* Definitions for CommTask */
@@ -92,6 +94,23 @@ const bq76942_temp_t *Bms_GetBqTemperatures(void)
 uint32_t Bms_GetBqTempFailCount(void)
 {
   return s_bq_temp_fail_count;
+}
+
+uint32_t Bms_GetBqCommFailCount(void)
+{
+  return s_bq_comm_fail_count;
+}
+
+void Bms_RecordBqI2cResult(bool success)
+{
+  if (success)
+  {
+    s_bq_comm_fail_count = 0U;
+  }
+  else if (s_bq_comm_fail_count < 0xFFFFFFFFU)
+  {
+    s_bq_comm_fail_count++;
+  }
 }
 /* USER CODE END FunctionPrototypes */
 
@@ -234,19 +253,21 @@ void StartBmsTask(void *argument)
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
   osDelay(300);
+  Balance_Init();
 
   for (;;)
   {
     if (BQ76942_ReadTemperatures(&hi2c2, &s_bq_temp))
     {
       s_bq_temp_fail_count = 0U;
-      /* Int/TS1/TS2: *_temp_c_x10 (°C*10); TS3=SW2 → ts3_adcin_mv */
     }
     else
     {
       s_bq_temp.valid = false;
       s_bq_temp_fail_count++;
     }
+
+    Balance_Process(&hi2c2);
 
     /* 同时：PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
     if (!s_dsg_enabled)

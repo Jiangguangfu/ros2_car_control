@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    bq76942.c
- * @brief   BQ76942 temperature + DSG/FET enable for 24V pack output.
+ * @brief   BQ76942 temperature, cells, FET, passive balance for 6S 24V pack.
  ******************************************************************************
  */
 #include "bq76942.h"
@@ -10,6 +10,41 @@
 
 #define BQ76942_I2C_TIMEOUT_MS            50U
 #define BQ76942_SUBCMD_WAIT_MS            2U
+
+static bool BQ76942_ReadU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t *value)
+{
+  uint8_t buf[2];
+
+  if ((hi2c == NULL) || (value == NULL))
+  {
+    return false;
+  }
+
+  if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, cmd, I2C_MEMADD_SIZE_8BIT,
+                       buf, sizeof(buf), BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    return false;
+  }
+
+  *value = (uint16_t)buf[0] | ((uint16_t)buf[1] << 8);
+  return true;
+}
+
+static bool BQ76942_WriteU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t value)
+{
+  uint8_t buf[2];
+
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  buf[0] = (uint8_t)(value & 0xFFU);
+  buf[1] = (uint8_t)((value >> 8) & 0xFFU);
+
+  return (HAL_I2C_Mem_Write(hi2c, BQ76942_I2C_ADDR_HAL, cmd, I2C_MEMADD_SIZE_8BIT,
+                            buf, sizeof(buf), BQ76942_I2C_TIMEOUT_MS) == HAL_OK);
+}
 
 bool BQ76942_IsReady(I2C_HandleTypeDef *hi2c)
 {
@@ -188,4 +223,121 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
 
   /* Success if DSG FET driver reports on (pack discharge / 24V path). */
   return ((fet_status & BQ76942_FETSTAT_DSG_FET) != 0U);
+}
+
+bool BQ76942_ReadCellVoltages(I2C_HandleTypeDef *hi2c, uint8_t cell_count,
+                              bq76942_cells_t *out)
+{
+  uint8_t i;
+
+  if ((hi2c == NULL) || (out == NULL) || (cell_count == 0U) ||
+      (cell_count > BQ76942_MAX_CELLS))
+  {
+    return false;
+  }
+
+  out->valid = false;
+  out->cell_count = cell_count;
+
+  for (i = 0U; i < cell_count; i++)
+  {
+    if (!BQ76942_ReadU16(hi2c, BQ76942_CellVoltageCmd(i), &out->cell_mv[i]))
+    {
+      return false;
+    }
+  }
+
+  if (!BQ76942_ReadU16(hi2c, BQ76942_CMD_STACK_VOLTAGE, &out->stack_mv))
+  {
+    return false;
+  }
+
+  out->valid = true;
+  return true;
+}
+
+bool BQ76942_ReadPackCurrent(I2C_HandleTypeDef *hi2c, int16_t *current_ma)
+{
+  uint16_t raw;
+
+  if ((hi2c == NULL) || (current_ma == NULL))
+  {
+    return false;
+  }
+
+  if (!BQ76942_ReadU16(hi2c, BQ76942_CMD_CC2_CURRENT, &raw))
+  {
+    return false;
+  }
+
+  *current_ma = (int16_t)raw;
+  return true;
+}
+
+bool BQ76942_ReadBatteryStatus(I2C_HandleTypeDef *hi2c, uint16_t *status)
+{
+  if ((hi2c == NULL) || (status == NULL))
+  {
+    return false;
+  }
+
+  return BQ76942_ReadU16(hi2c, BQ76942_CMD_BATTERY_STATUS, status);
+}
+
+bool BQ76942_ReadSafetyStatus(I2C_HandleTypeDef *hi2c, bool *protect_active)
+{
+  uint8_t sa;
+  uint8_t sb;
+  uint8_t sc;
+
+  if ((hi2c == NULL) || (protect_active == NULL))
+  {
+    return false;
+  }
+
+  *protect_active = false;
+
+  if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_CMD_SAFETY_STATUS_A,
+                       I2C_MEMADD_SIZE_8BIT, &sa, 1U,
+                       BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    return false;
+  }
+
+  if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_CMD_SAFETY_STATUS_B,
+                       I2C_MEMADD_SIZE_8BIT, &sb, 1U,
+                       BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    return false;
+  }
+
+  if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_CMD_SAFETY_STATUS_C,
+                       I2C_MEMADD_SIZE_8BIT, &sc, 1U,
+                       BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    return false;
+  }
+
+  *protect_active = ((sa != 0U) || (sb != 0U) || (sc != 0U));
+  return true;
+}
+
+bool BQ76942_SetBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t mask)
+{
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  return BQ76942_WriteU16(hi2c, BQ76942_CMD_CB_ACTIVE_CELLS, mask);
+}
+
+bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask)
+{
+  if ((hi2c == NULL) || (mask == NULL))
+  {
+    return false;
+  }
+
+  return BQ76942_ReadU16(hi2c, BQ76942_CMD_CB_ACTIVE_CELLS, mask);
 }

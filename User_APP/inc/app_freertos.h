@@ -63,6 +63,8 @@ extern osThreadId_t BmsTaskHandle;
 /* USER CODE BEGIN FunctionPrototypes */
 const bq76942_temp_t *Bms_GetBqTemperatures(void);
 uint32_t Bms_GetBqTempFailCount(void);
+uint32_t Bms_GetBqCommFailCount(void);
+void Bms_RecordBqI2cResult(bool success);
 /* USER CODE END FunctionPrototypes */
 
 void StartCommonTaskCommon(void *argument);
