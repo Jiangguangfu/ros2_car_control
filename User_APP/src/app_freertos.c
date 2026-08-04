@@ -185,9 +185,10 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_StartCommonTaskCommon */
 void StartCommonTaskCommon(void *argument)
 {
+  uint32_t count = 0;
   /* USER CODE BEGIN CommTask */
   (void)argument;
-  /* 等 ServiceTask 电源时序完成后再发 CAN */
+  count = HAL_GetTick();
   osDelay(1500);
 
   for (;;) {

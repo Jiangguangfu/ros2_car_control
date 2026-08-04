@@ -185,6 +185,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_MSIRCxPLLTypeDef msis_pll = {0};
 
   /** Configure the System Power Supply
    *  Prefer SMPS; fall back to LDO if board has no SMPS path.
@@ -197,17 +198,6 @@ void SystemClock_Config(void)
     }
   }
 
-  /** Enable Epod Booster
-  */
-  if (HAL_RCCEx_EpodBoosterClkConfig(RCC_EPODBOOSTER_SOURCE_MSIS, RCC_EPODBOOSTER_DIV1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_PWREx_EnableEpodBooster() != HAL_OK)
-  {
-    Error_Handler();
-  }
-
   /** Configure the main internal regulator output voltage
   */
   if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
@@ -215,13 +205,14 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
-  /** Set Flash latency before increasing MSIS
+  /** Set Flash latency before raising MSIS
   */
   __HAL_FLASH_SET_LATENCY(FLASH_LATENCY_2);
 
-  /** Initializes the CPU, AHB and APB buses clocks
+  /** HSE (16 MHz) + MSIS (96 MHz, MSIRC0/div1)
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSIS;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_MSIS;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.MSISState = RCC_MSI_ON;
   RCC_OscInitStruct.MSISSource = RCC_MSI_RC0;
   RCC_OscInitStruct.MSISDiv = RCC_MSI_DIV1;
@@ -230,7 +221,27 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
+  /** Discipline MSIS to HSE crystal for higher clock accuracy (CAN/UART/I2C). */
+  msis_pll.State = RCC_MSIRCx_PLL_ON;
+  msis_pll.InputSrce = RCC_MSIRCx_PLL_INPUT_HSE;
+  msis_pll.FastMode = RCC_MSIRCx_PLL_FAST_ENABLE;
+  if (HAL_RCCEx_MSIRCxPLLModeConfig(RCC_MSI_RC0, &msis_pll) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Epod Booster fed from stable HSE
+  */
+  if (HAL_RCCEx_EpodBoosterClkConfig(RCC_EPODBOOSTER_SOURCE_HSE, RCC_EPODBOOSTER_DIV1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_PWREx_EnableEpodBooster() != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Bus clocks: SYSCLK = MSIS (96 MHz)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
