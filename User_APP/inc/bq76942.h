@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    bq76942.h
- * @brief   BQ76942 I2C helpers: temperature, cells, FET, passive balance.
+ * @brief   BQ76942 I2C helpers: temperature, cells, FET, passive balance, meas.
  *
  * Schematic (BQ76942PBR):
  *   TS1/TS2 — NTC; TS3 — SW2
@@ -28,6 +28,7 @@ extern "C" {
 #define BQ76942_CMD_BATTERY_STATUS        0x12U
 #define BQ76942_CMD_CELL1_VOLTAGE         0x14U
 #define BQ76942_CMD_STACK_VOLTAGE         0x34U
+#define BQ76942_CMD_PACK_VOLTAGE          0x36U
 #define BQ76942_CMD_CC2_CURRENT           0x3AU
 #define BQ76942_CMD_CB_ACTIVE_CELLS       0x83U
 #define BQ76942_CMD_FET_STATUS            0x7FU
@@ -50,6 +51,31 @@ extern "C" {
 #define BQ76942_SUBCMD_ALL_FETS_ON        0x0096U
 #define BQ76942_SUBCMD_ALL_FETS_OFF       0x0095U
 #define BQ76942_SUBCMD_MFG_STATUS         0x0057U
+#define BQ76942_SUBCMD_DASTATUS5          0x0075U /* REG18/VSS/temps + CC1/CC3 */
+#define BQ76942_SUBCMD_CONFIG_UPDATE      0x0090U
+#define BQ76942_SUBCMD_CONFIG_UPDATE_EXIT 0x0092U
+
+/* Offset of CC3 Current (I2, userA) within DASTATUS5 transfer buffer. */
+#define BQ76942_DASTATUS5_CC3_OFFSET      20U
+
+/* Data memory: Calibration:V Divider Offset:Vdiv Offset (I2, userV). */
+#define BQ76942_DM_Vdiv_OFFSET            0x91B2U
+/* cV mode: 100 = 1 V offset for Stack/PACK/LD divider. */
+#define BQ76942_Vdiv_OFFSET_VALUE         100
+
+/* Stack/PACK userV unit: 1=cV(10mV), 0=mV — match DA Configuration[USER_VOLTS_CV]. */
+#ifndef BQ76942_USERV_IS_CV
+#define BQ76942_USERV_IS_CV               1
+#endif
+
+/* Pack topology for aggregated measurements (3..10 for BQ76942). */
+#ifndef BQ76942_CELL_COUNT
+#define BQ76942_CELL_COUNT                6U
+#endif
+
+#if (BQ76942_CELL_COUNT < 1U) || (BQ76942_CELL_COUNT > 10U)
+#error "BQ76942_CELL_COUNT must be 1..10"
+#endif
 
 /* 0x0057 Manufacturing Status bits */
 #define BQ76942_MFG_FET_EN                (1U << 4)
@@ -80,11 +106,33 @@ typedef struct
   bool valid;
 } bq76942_cells_t;
 
+typedef struct
+{
+  uint16_t cell_mv[BQ76942_CELL_COUNT]; /* per-cell voltage, mV */
+  uint32_t pack_mv;                     /* Stack (0x34), mV */
+  uint32_t output_mv;                   /* PACK pin (0x36), mV */
+  int16_t current_ma;                   /* CC2 (0x3A), mA (+ charge / - discharge) */
+  int16_t current_cc3_ma;               /* CC3 avg of CC2 samples, mA (DASTATUS5) */
+  uint16_t vcell_min_mv;
+  uint16_t vcell_max_mv;
+  bool valid;
+} bq76942_meas_t;
+
 bool BQ76942_IsReady(I2C_HandleTypeDef *hi2c);
+bool BQ76942_ReadDirectU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t *raw);
+bool BQ76942_ReadDirectS16(I2C_HandleTypeDef *hi2c, uint8_t cmd, int16_t *raw);
 bool BQ76942_ReadTempRaw(I2C_HandleTypeDef *hi2c, uint8_t cmd, int16_t *raw);
 bool BQ76942_ReadTemperatures(I2C_HandleTypeDef *hi2c, bq76942_temp_t *out);
+bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out);
+
+bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
+                             const uint8_t *data, uint8_t len);
+/** Write Vdiv Offset to 0x91B2 (requires CONFIG_UPDATE). Call once at init. */
+bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv);
 
 bool BQ76942_SubCommandWrite(I2C_HandleTypeDef *hi2c, uint16_t subcmd);
+bool BQ76942_SubCommandRead(I2C_HandleTypeDef *hi2c, uint16_t subcmd,
+                            uint8_t *data, uint8_t len);
 bool BQ76942_SubCommandReadU16(I2C_HandleTypeDef *hi2c, uint16_t subcmd, uint16_t *value);
 bool BQ76942_ReadFetStatus(I2C_HandleTypeDef *hi2c, uint8_t *fet_status);
 
@@ -110,6 +158,16 @@ static inline int16_t BQ76942_Temp0p1KToCx10(int16_t temp_0p1k)
 static inline uint8_t BQ76942_CellVoltageCmd(uint8_t cell_index)
 {
   return (uint8_t)(BQ76942_CMD_CELL1_VOLTAGE + (cell_index * 2U));
+}
+
+/** Stack/PACK direct commands: userV → mV. */
+static inline uint32_t BQ76942_UserVToMv(uint16_t raw_user_v)
+{
+#if (BQ76942_USERV_IS_CV != 0)
+  return ((uint32_t)raw_user_v * 10U);
+#else
+  return (uint32_t)raw_user_v;
+#endif
 }
 
 #ifdef __cplusplus

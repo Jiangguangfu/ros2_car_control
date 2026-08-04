@@ -51,8 +51,10 @@
 extern I2C_HandleTypeDef hi2c2;
 
 static bq76942_temp_t s_bq_temp;
+static bq76942_meas_t s_bq_meas;
 static uint32_t s_bq_temp_fail_count;
 static uint32_t s_bq_comm_fail_count;
+static uint32_t s_bq_meas_fail_count;
 
 /* USER CODE END Variables */
 /* Definitions for CommTask */
@@ -91,6 +93,11 @@ const bq76942_temp_t *Bms_GetBqTemperatures(void)
   return &s_bq_temp;
 }
 
+const bq76942_meas_t *Bms_GetBqMeasurements(void)
+{
+  return &s_bq_meas;
+}
+
 uint32_t Bms_GetBqTempFailCount(void)
 {
   return s_bq_temp_fail_count;
@@ -112,6 +119,11 @@ void Bms_RecordBqI2cResult(bool success)
     s_bq_comm_fail_count++;
   }
 }
+uint32_t Bms_GetBqMeasFailCount(void)
+{
+  return s_bq_meas_fail_count;
+}
+
 /* USER CODE END FunctionPrototypes */
 
 /**
@@ -197,6 +209,7 @@ void StartServiceTask(void *argument)
   HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
   /* PC13: 24V Bypass Control */
   HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
+
   osDelay(100);
 
   /* 开机提示：蜂鸣器响三声 */
@@ -268,6 +281,16 @@ void StartBmsTask(void *argument)
     }
 
     Balance_Process(&hi2c2);
+    if (BQ76942_ReadMeasurements(&hi2c2, &s_bq_meas))
+    {
+      s_bq_meas_fail_count = 0U;
+      /* cell_mv[] mV, pack_mv/output_mv mV, current_ma=CC2, current_cc3_ma=CC3 */
+    }
+    else
+    {
+      s_bq_meas.valid = false;
+      s_bq_meas_fail_count++;
+    }
 
     /* 同时：PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
     if (!s_dsg_enabled)

@@ -50,7 +50,7 @@ extern "C" {
 
 /* USER CODE END PD */
 
-/* Exported macro -------------------------------------------------------------*/
+/* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
 
 /* USER CODE END EM */
@@ -62,8 +62,10 @@ extern osThreadId_t BmsTaskHandle;
 /* Exported function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 const bq76942_temp_t *Bms_GetBqTemperatures(void);
+const bq76942_meas_t *Bms_GetBqMeasurements(void);
 uint32_t Bms_GetBqTempFailCount(void);
 uint32_t Bms_GetBqCommFailCount(void);
+uint32_t Bms_GetBqMeasFailCount(void);
 void Bms_RecordBqI2cResult(bool success);
 /* USER CODE END FunctionPrototypes */
 
