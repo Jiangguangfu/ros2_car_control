@@ -10,6 +10,7 @@
 static bool s_thermal_charge_off;
 static bool s_thermal_discharge_off;
 static bool s_imbalance_charge_off;
+static bool s_charge_manager_off;
 static bool s_charge_inhibited;
 static bool s_discharge_inhibited;
 
@@ -22,6 +23,7 @@ void ChargePath_Init(void)
     s_thermal_charge_off = false;
     s_thermal_discharge_off = false;
     s_imbalance_charge_off = false;
+    s_charge_manager_off = true;
     s_charge_inhibited = false;
     s_discharge_inhibited = false;
     s_inited = true;
@@ -41,9 +43,15 @@ void ChargePath_SetImbalanceChargeInhibit(bool charge_off)
   s_imbalance_charge_off = charge_off;
 }
 
+void ChargePath_SetChargeManagerInhibit(bool charge_off)
+{
+  s_charge_manager_off = charge_off;
+}
+
 void ChargePath_Apply(void)
 {
-  s_charge_inhibited = s_thermal_charge_off || s_imbalance_charge_off;
+  s_charge_inhibited =
+      s_thermal_charge_off || s_imbalance_charge_off || s_charge_manager_off;
   s_discharge_inhibited = s_thermal_discharge_off;
 
   /* Active-high: SET forces corresponding FET path off. */

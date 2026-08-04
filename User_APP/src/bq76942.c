@@ -341,23 +341,15 @@ bool BQ76942_ReadFetStatus(I2C_HandleTypeDef *hi2c, uint8_t *fet_status)
                            BQ76942_I2C_TIMEOUT_MS) == HAL_OK);
 }
 
-bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
+static bool BQ76942_EnsureFetsEnabled(I2C_HandleTypeDef *hi2c)
 {
   uint16_t mfg_status = 0U;
-  uint8_t fet_status = 0U;
 
   if (hi2c == NULL)
   {
     return false;
   }
 
-  /* PC13: 24V bypass control — board path enable (independent of BQ I2C). */
-  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
-
-  /* Release host DFETOFF for pack discharge; CFETOFF owned by charge_path. */
-  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_RESET);
-
-  /* Default power-up is often FET Test mode (FET_EN=0). Toggle into normal. */
   if (!BQ76942_SubCommandReadU16(hi2c, BQ76942_SUBCMD_MFG_STATUS, &mfg_status))
   {
     return false;
@@ -372,12 +364,34 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
     osDelay(10);
   }
 
-  /* Allow CHG/DSG drivers if no protection is blocking. */
   if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_ALL_FETS_ON))
   {
     return false;
   }
+
   osDelay(10);
+  return true;
+}
+
+bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
+{
+  uint8_t fet_status = 0U;
+
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  /* PC13: 24V bypass control — board path enable (independent of BQ I2C). */
+  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
+
+  /* Release host DFETOFF for pack discharge; CFETOFF owned by charge_path. */
+  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_RESET);
+
+  if (!BQ76942_EnsureFetsEnabled(hi2c))
+  {
+    return false;
+  }
 
   if (!BQ76942_ReadFetStatus(hi2c, &fet_status))
   {
@@ -386,6 +400,28 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
 
   /* Success if DSG FET driver reports on (pack discharge / 24V path). */
   return ((fet_status & BQ76942_FETSTAT_DSG_FET) != 0U);
+}
+
+bool BQ76942_EnableChargePath(I2C_HandleTypeDef *hi2c)
+{
+  uint8_t fet_status = 0U;
+
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  if (!BQ76942_EnsureFetsEnabled(hi2c))
+  {
+    return false;
+  }
+
+  if (!BQ76942_ReadFetStatus(hi2c, &fet_status))
+  {
+    return false;
+  }
+
+  return ((fet_status & BQ76942_FETSTAT_CHG_FET) != 0U);
 }
 
 bool BQ76942_ReadCellVoltages(I2C_HandleTypeDef *hi2c, uint8_t cell_count,

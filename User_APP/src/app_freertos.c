@@ -27,6 +27,7 @@
 #include "bq76942.h"
 #include "cell_balance_manager.h"
 #include "charge_path.h"
+#include "charge_manager.h"
 #include "thermal_manager.h"
 #include "bms_can_tx.h"
 #include "uart_battery_report.h"
@@ -268,6 +269,7 @@ void StartBmsTask(void *argument)
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
   osDelay(300);
   ChargePath_Init();
+  ChargeManager_Init();
   Balance_Init();
 
   for (;;)
@@ -295,6 +297,8 @@ void StartBmsTask(void *argument)
       s_bq_meas.valid = false;
       s_bq_meas_fail_count++;
     }
+
+    ChargeManager_Process(&hi2c2);
 
     /* 同时：PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
     if (!s_dsg_enabled)

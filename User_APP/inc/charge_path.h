@@ -27,6 +27,9 @@ void ChargePath_SetThermalInhibit(bool charge_off, bool discharge_off);
  */
 void ChargePath_SetImbalanceChargeInhibit(bool charge_off);
 
+/** Charge manager: inhibit when idle/stop/complete/fault; allow when CHARGING. */
+void ChargePath_SetChargeManagerInhibit(bool charge_off);
+
 /** Drive CFETOFF/DFETOFF from OR of all requests. */
 void ChargePath_Apply(void);
 

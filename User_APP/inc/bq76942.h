@@ -150,6 +150,12 @@ bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask);
  */
 bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c);
 
+/**
+ * Ensure FET_EN + ALL_FETS_ON; CFETOFF released by charge_path.
+ * Returns true when CHG FET driver reports on.
+ */
+bool BQ76942_EnableChargePath(I2C_HandleTypeDef *hi2c);
+
 static inline int16_t BQ76942_Temp0p1KToCx10(int16_t temp_0p1k)
 {
   return (int16_t)(temp_0p1k - 2732);
