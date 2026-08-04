@@ -28,7 +28,8 @@
 #include "cell_balance_manager.h"
 #include "charge_path.h"
 #include "thermal_manager.h"
-#include "bms_can_bench.h"
+#include "bms_can_tx.h"
+#include "uart_battery_report.h"
 #include "main.h"
 
 /* USER CODE END Includes */
@@ -189,8 +190,8 @@ void StartCommonTaskCommon(void *argument)
   osDelay(1500);
 
   for (;;) {
-    BMS_CanBench_Process();
-    osDelay(200);
+    BMS_CanTx_Process();
+    osDelay(BMS_CAN_BATTERY_PERIOD_MS);
   }
   /* USER CODE END CommTask */
 }

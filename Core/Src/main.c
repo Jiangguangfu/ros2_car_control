@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "bms_can_bench.h"
+#include "bms_can_tx.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -142,7 +142,7 @@ int main(void)
   (void)HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
                                      FDCAN_REJECT, FDCAN_REJECT,
                                      FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
-  BMS_CanBench_Init();
+  BMS_CanTx_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */

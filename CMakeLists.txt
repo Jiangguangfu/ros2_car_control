@@ -45,7 +45,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/app_freertos.c
-    User_APP/src/bms_can_bench.c
+    User_APP/src/bms_can_tx.c
+    User_APP/src/bms_data_snapshot.c
     User_APP/src/bsp_buzzer.c
     User_APP/src/bsp_ws2812.c
     User_APP/src/bq76942.c
