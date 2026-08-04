@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bms_can_bench.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -84,7 +84,19 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+static void BMS_EnablePowerRails(void)
+{
+  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
+  HAL_Delay(300);
+  HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
+  HAL_Delay(300);
+  HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+}
 /* USER CODE END 0 */
 
 /**
@@ -116,25 +128,41 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  /* ADC/FDCAN 暂跳过：相关外设未联调 */
-  /* MX_GPDMA1_Init(); */
-  /* MX_ADC1_Init(); */
-  MX_I2C2_Init(); /* BQ76942 on I2C2 (PB13/PB14) */
-  /* MX_FDCAN1_Init(); */
+  BMS_EnablePowerRails();
+  MX_GPDMA1_Init();
+  MX_ADC1_Init();
+  MX_I2C2_Init();
+  MX_FDCAN1_Init();
   MX_TIM2_Init();
   MX_TIM4_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_Delay(300);
+  (void)HAL_FDCAN_Start(&hfdcan1);
+  (void)HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
+                                     FDCAN_REJECT, FDCAN_REJECT,
+                                     FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
+  BMS_CanBench_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
-  osKernelInitialize();
-  /* Call init function for freertos objects (in app_freertos.c) */
+  g_ipsr_before_kernel = __get_IPSR();
+  g_primask_before_kernel = __get_PRIMASK();
+  g_basepri_before_kernel = __get_BASEPRI();
+  g_kernel_init_status = osKernelInitialize();
+  if (g_kernel_init_status != osOK)
+  {
+    Error_Handler();
+  }
   MX_FREERTOS_Init();
-
-  /* Start scheduler */
-  osKernelStart();
+  g_ipsr_before_kernel = __get_IPSR();
+  g_primask_before_kernel = __get_PRIMASK();
+  g_basepri_before_kernel = __get_BASEPRI();
+  g_kernel_start_status = osKernelStart();
+  if (g_kernel_start_status != osOK)
+  {
+    Error_Handler();
+  }
 
   /* We should never get here as control is now taken by the scheduler */
 
@@ -367,18 +395,18 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1.Init.AutoRetransmission = ENABLE;
-  hfdcan1.Init.TransmitPause = ENABLE;
+  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 2;
-  hfdcan1.Init.NominalSyncJumpWidth = 24;
+  hfdcan1.Init.NominalSyncJumpWidth = 1;
   hfdcan1.Init.NominalTimeSeg1 = 71;
   hfdcan1.Init.NominalTimeSeg2 = 24;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
   hfdcan1.Init.DataTimeSeg2 = 1;
-  hfdcan1.Init.StdFiltersNbr = 1;
+  hfdcan1.Init.StdFiltersNbr = 0;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)

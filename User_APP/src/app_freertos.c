@@ -27,6 +27,7 @@
 #include "bq76942.h"
 #include "cell_balance_manager.h"
 #include "thermal_manager.h"
+#include "bms_can_bench.h"
 #include "main.h"
 
 /* USER CODE END Includes */
@@ -182,10 +183,13 @@ void MX_FREERTOS_Init(void) {
 void StartCommonTaskCommon(void *argument)
 {
   /* USER CODE BEGIN CommTask */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
+  (void)argument;
+  /* 等 ServiceTask 电源时序完成后再发 CAN */
+  osDelay(1500);
+
+  for (;;) {
+    BMS_CanBench_Process();
+    osDelay(200);
   }
   /* USER CODE END CommTask */
 }
@@ -200,28 +204,21 @@ void StartCommonTaskCommon(void *argument)
 void StartServiceTask(void *argument)
 {
   /* USER CODE BEGIN ServiceTask */
-  static uint32_t count_heartbeat = 0;
-  static uint32_t tick_after = 0;
-  /* 打开外设供电 */
-  HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
-  /* PB4: 19V rail enable */
-  HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
-  /* PC13: 24V Bypass Control */
-  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
+  (void)argument;
 
+  /* BQ FET + 电源时序（CommTask 等 1500ms 后再发 CAN） */
+  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
+  osDelay(300);
+  HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
+  osDelay(300);
+  HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
+  osDelay(200);
+  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
   osDelay(100);
 
-  /* 开机提示：蜂鸣器响三声 */
-  for (int i = 0; i < 3; i++) {
-    //BSP_Buzzer_Beep(200);
-    osDelay(150);
-  }
-
-  /* Infinite loop */
   for (;;) {
-    tick_after = HAL_GetTick();
-    count_heartbeat++;
     osDelay(1000);
   }
   /* USER CODE END ServiceTask */
