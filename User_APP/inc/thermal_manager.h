@@ -5,7 +5,7 @@
  *
  * Levels (cell/pack NTC, °C*10, with hysteresis):
  *   NORMAL → WARN → LIMIT → FAULT
- * Actuators: SYS_FAN_PWM, BQ_CFETOFF / BQ_DFETOFF.
+ * Actuators: SYS_FAN_PWM; FET-off via charge_path (OR with imbalance).
  ******************************************************************************
  */
 #ifndef THERMAL_MANAGER_H

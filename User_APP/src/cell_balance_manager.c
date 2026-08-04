@@ -7,6 +7,7 @@
 #include "cell_balance_manager.h"
 #include "bq76942.h"
 #include "thermal_manager.h"
+#include "charge_path.h"
 #include "app_freertos.h"
 
 static balance_status_t s_status;
@@ -213,9 +214,45 @@ static bool Balance_EvalCriticalFault(const thermal_status_t *thermal,
   return false;
 }
 
+static void Balance_UpdateImbalanceChargeInhibit(bool sample_stable)
+{
+  bool inhibit = ChargePath_IsImbalanceChargeInhibit();
+
+  if (!sample_stable)
+  {
+    /* Keep previous request until samples recover; still apply path. */
+    s_status.imbalance_charge_inhibit = inhibit;
+    ChargePath_Apply();
+    return;
+  }
+
+  if (inhibit)
+  {
+    if (s_status.delta_mv <= CHARGE_IMBALANCE_RESUME_DELTA_MV)
+    {
+      inhibit = false;
+    }
+  }
+  else
+  {
+    /* Enter stop-charge only in a charge context (FET on or already present). */
+    if ((s_status.delta_mv >= CHARGE_IMBALANCE_STOP_DELTA_MV) &&
+        (s_status.chg_fet_on || s_status.charger_present))
+    {
+      inhibit = true;
+    }
+  }
+
+  s_status.imbalance_charge_inhibit = inhibit;
+  ChargePath_SetImbalanceChargeInhibit(inhibit);
+  ChargePath_Apply();
+}
+
 static void Balance_UpdateChargerPath(void)
 {
+  bool path_ok;
   bool raw;
+  const bool imbalance_hold = ChargePath_IsImbalanceChargeInhibit();
 
   if (s_charger_present_explicit)
   {
@@ -223,15 +260,11 @@ static void Balance_UpdateChargerPath(void)
   }
   else
   {
-    /* P0: no dedicated charger sense — infer from CHG FET path. */
-    s_status.charger_present = s_status.chg_fet_on;
-  }
-
-  if (!s_status.charger_present || !s_status.chg_fet_on)
-  {
-    s_status.charger_active = false;
-    s_status.charge_stable_count = 0U;
-    return;
+    /*
+     * Infer present from CHG FET, or keep present while imbalance paused
+     * charging (CFETOFF forced off so FET status alone would falsely clear).
+     */
+    s_status.charger_present = s_status.chg_fet_on || imbalance_hold;
   }
 
   if (s_status.pack_current_ma <= BALANCE_DISCHARGE_EXIT_MA)
@@ -252,10 +285,23 @@ static void Balance_UpdateChargerPath(void)
     s_status.discharge_exit_count = 0U;
   }
 
-  raw = s_status.charger_present &&
-        s_status.chg_fet_on &&
-        (!s_status.discharge_detected);
+  /*
+   * Balance may continue while imbalance holds charge off:
+   * charger_present && (chg_fet_on || imbalance_hold) && !discharge.
+   */
+  path_ok = s_status.charger_present &&
+            (s_status.chg_fet_on || imbalance_hold) &&
+            (!s_status.discharge_detected);
 
+  if (!path_ok)
+  {
+    s_status.charger_active = false;
+    s_status.charge_stable_count = 0U;
+    s_status.charger_active_stable = false;
+    return;
+  }
+
+  raw = path_ok;
   s_status.charger_active = raw;
 
   if (raw)
@@ -286,8 +332,10 @@ void Balance_Init(void)
   s_status.charge_stable_count = 0U;
   s_status.discharge_exit_count = 0U;
   s_status.discharge_detected = false;
+  s_status.imbalance_charge_inhibit = false;
   s_charger_present_explicit = false;
   s_charger_present_value = false;
+  ChargePath_SetImbalanceChargeInhibit(false);
 }
 
 void Balance_SetEnabled(bool enable)
@@ -419,6 +467,10 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
   }
 
   Balance_UpdateChargerPath();
+  Balance_UpdateImbalanceChargeInhibit(
+      sample_ok && (s_status.stable_count >= BALANCE_SAMPLE_STABLE_COUNT));
+  /* Re-evaluate path after imbalance may have changed CFETOFF / present latch. */
+  Balance_UpdateChargerPath();
 
   temperature_normal = Balance_EvalTemperature();
 
@@ -508,7 +560,16 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
 
   if (s_status.state == BALANCE_STATE_ACTIVE)
   {
-    if (!s_status.charger_present || !s_status.chg_fet_on)
+    /* Allow ACTIVE while imbalance holds charge off (chg_fet may read off). */
+    if (!s_status.charger_present && !ChargePath_IsImbalanceChargeInhibit())
+    {
+      Balance_StopAll(hi2c);
+      s_status.state = BALANCE_STATE_IDLE;
+      s_status.inhibit_reason = BALANCE_INHIBIT_NOT_CHARGING;
+      return;
+    }
+
+    if (!s_status.chg_fet_on && !ChargePath_IsImbalanceChargeInhibit())
     {
       Balance_StopAll(hi2c);
       s_status.state = BALANCE_STATE_IDLE;

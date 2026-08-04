@@ -26,6 +26,7 @@
 #include "bsp_fan.h"
 #include "bq76942.h"
 #include "cell_balance_manager.h"
+#include "charge_path.h"
 #include "thermal_manager.h"
 #include "bms_can_bench.h"
 #include "main.h"
@@ -238,11 +239,13 @@ void StartPowerTask(void *argument)
 
   /* Wait for rails + first BQ samples from BmsTask. */
   osDelay(500);
+  ChargePath_Init();
   Thermal_Init();
 
   for (;;)
   {
     Thermal_Process();
+    ChargePath_Apply();
     osDelay(200);
   }
   /* USER CODE END PowerTask */
@@ -263,6 +266,7 @@ void StartBmsTask(void *argument)
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
   osDelay(300);
+  ChargePath_Init();
   Balance_Init();
 
   for (;;)
@@ -278,6 +282,8 @@ void StartBmsTask(void *argument)
     }
 
     Balance_Process(&hi2c2);
+    ChargePath_Apply();
+
     if (BQ76942_ReadMeasurements(&hi2c2, &s_bq_meas))
     {
       s_bq_meas_fail_count = 0U;
@@ -293,6 +299,7 @@ void StartBmsTask(void *argument)
     if (!s_dsg_enabled)
     {
       s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
+      ChargePath_Apply(); /* Restore CFETOFF if imbalance/thermal request */
     }
 
     osDelay(500);

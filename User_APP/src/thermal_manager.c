@@ -6,6 +6,7 @@
  */
 #include "thermal_manager.h"
 #include "bsp_fan.h"
+#include "charge_path.h"
 #include "app_freertos.h"
 #include "main.h"
 
@@ -31,14 +32,11 @@ static bool s_fault_latched;
 
 static void Thermal_SetFetOff(bool charge_off, bool discharge_off)
 {
-  /* BQ76942 CFETOFF/DFETOFF: host high forces corresponding FET path off. */
-  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin,
-                    charge_off ? GPIO_PIN_SET : GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin,
-                    discharge_off ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
+  /* Request only — ChargePath_Apply() ORs with imbalance and drives pins. */
   s_status.charge_inhibit = charge_off;
   s_status.discharge_inhibit = discharge_off;
+  ChargePath_SetThermalInhibit(charge_off, discharge_off);
+  ChargePath_Apply();
 }
 
 static void Thermal_ApplyActuators(void)

@@ -30,6 +30,7 @@ BmsTask           — BQ76942 采样 + cell_balance_manager（500 ms）
 | BQ 驱动 | `User_APP/src/bq76942.c` | 温度、6 节电压、电流、FET、均衡掩码 |
 | 热管理 | `User_APP/src/thermal_manager.c` | TS1/TS2 NTC、风扇、FET 关断 |
 | 被动均衡 | `User_APP/src/cell_balance_manager.c` | 充电末期均衡策略与状态 |
+| 充电路径 | `User_APP/src/charge_path.c` | CFETOFF/DFETOFF 仲裁（热管理 OR 压差停充） |
 
 ## 被动均衡（cell_balance_manager）
 
@@ -64,6 +65,23 @@ BmsTask           — BQ76942 采样 + cell_balance_manager（500 ms）
 | `BALANCE_DISCHARGE_RECOVER_MA` | -50 | 允许继续（mA） |
 | `BALANCE_DISCHARGE_EXIT_MA` | -100 | 明显放电（mA） |
 | `BALANCE_SAMPLE_STABLE_COUNT` | 3 | 采样稳定次数（≈1.5 s） |
+| `CHARGE_IMBALANCE_STOP_DELTA_MV` | 50 | 充电中 Δ≥50 → 停止充电 |
+| `CHARGE_IMBALANCE_RESUME_DELTA_MV` | 30 | Δ≤30 → 解除压差停充 |
+
+### 压差停充（与均衡独立）
+
+充电中发现压差过大时先停充，被动均衡可继续，压差缩小后再恢复充电：
+
+```
+正常充电
+  → Δ ≥ 50 mV：置位压差停充，拉高 CFETOFF，关闭充电路径
+  → 仅保留被动均衡（不因 CHG FET 关闭而退出）
+  → Δ ≤ 30 mV：清除压差停充，恢复充电（热管理未禁止时）
+  → 均衡继续
+  → Δ ≤ 15 mV：均衡完成
+```
+
+CFETOFF 由 `charge_path` 仲裁：`thermal.charge_inhibit OR imbalance_charge_inhibit`。
 
 ### 压差与开启均衡条件（有 SOC / 无 SOC）
 
@@ -120,6 +138,8 @@ charger_active_stable && vmin >= 3900 mV && Δ >= 40 mV && common_ok
 |------|------|
 | 开启均衡的压差 | **≥ 40 mV**（有/无 SOC 相同） |
 | 停止均衡的压差 | **≤ 15 mV**（有/无 SOC 相同） |
+| 停止充电的压差 | **≥ 50 mV** |
+| 恢复充电的压差 | **≤ 30 mV** |
 | 有 SOC 额外条件 | SOC ≥ 90% 启动，≥ 88% 保持 |
 | 无 SOC 额外条件 | vmin ≥ 3900 mV 启动，≥ 3850 mV 保持 |
 
@@ -221,11 +241,13 @@ User_APP/
   inc/
     bq76942.h
     cell_balance_manager.h
+    charge_path.h
     thermal_manager.h
     app_freertos.h
   src/
     bq76942.c
     cell_balance_manager.c
+    charge_path.c
     thermal_manager.c
     app_freertos.c
 ```

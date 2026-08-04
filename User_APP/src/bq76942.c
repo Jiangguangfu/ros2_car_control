@@ -354,9 +354,8 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
   /* PC13: 24V bypass control — board path enable (independent of BQ I2C). */
   HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
 
-  /* Host must not force FETs off via pins (active-high inhibit on this board). */
+  /* Release host DFETOFF for pack discharge; CFETOFF owned by charge_path. */
   HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_RESET);
 
   /* Default power-up is often FET Test mode (FET_EN=0). Toggle into normal. */
   if (!BQ76942_SubCommandReadU16(hi2c, BQ76942_SUBCMD_MFG_STATUS, &mfg_status))

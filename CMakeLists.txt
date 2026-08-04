@@ -52,6 +52,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/bsp_fan.c
     User_APP/src/thermal_manager.c
     User_APP/src/cell_balance_manager.c
+    User_APP/src/charge_path.c
 )
 
 # Add include paths

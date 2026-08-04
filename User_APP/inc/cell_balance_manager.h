@@ -24,6 +24,10 @@ extern "C" {
 #define BALANCE_START_DELTA_MV           40U
 #define BALANCE_STOP_DELTA_MV            15U
 
+/* Charge pause on large imbalance (independent of balance 40/15). */
+#define CHARGE_IMBALANCE_STOP_DELTA_MV     50U
+#define CHARGE_IMBALANCE_RESUME_DELTA_MV   30U
+
 #define BALANCE_HARD_MIN_CELL_MV       3000U
 #define BALANCE_NORMAL_MAX_CELL_MV     4200U
 
@@ -91,6 +95,7 @@ typedef struct
   bool discharge_detected;
   bool charger_active;
   bool charger_active_stable;
+  bool imbalance_charge_inhibit; /* Δ≥50 stop charge; Δ≤30 clear */
 
   bool start_conditions_ok;
   bool hold_conditions_ok;
