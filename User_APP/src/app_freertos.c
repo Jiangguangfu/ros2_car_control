@@ -68,7 +68,7 @@ osThreadId_t CommTaskHandle;
 const osThreadAttr_t CommTask_attributes = {
   .name = "CommTask",
   .priority = (osPriority_t) osPriorityAboveNormal,
-  .stack_size = 768 * 4
+  .stack_size = 1024 * 4
 };
 /* Definitions for ServiceTask */
 osThreadId_t ServiceTaskHandle;
@@ -89,7 +89,7 @@ osThreadId_t BmsTaskHandle;
 const osThreadAttr_t BmsTask_attributes = {
   .name = "BmsTask",
   .priority = (osPriority_t) osPriorityHigh,
-  .stack_size = 768 * 4
+  .stack_size = 1280 * 4
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -284,9 +284,6 @@ void StartBmsTask(void *argument)
       s_bq_temp_fail_count++;
     }
 
-    Balance_Process(&hi2c2);
-    ChargePath_Apply();
-
     if (BQ76942_ReadMeasurements(&hi2c2, &s_bq_meas))
     {
       s_bq_meas_fail_count = 0U;
@@ -300,6 +297,8 @@ void StartBmsTask(void *argument)
     Soc_Process(&s_bq_meas, BMS_TASK_PERIOD_MS);
     Balance_SetSoc(Soc_GetPercent(), Soc_IsValid());
 
+    Balance_Process(&hi2c2);
+    ChargePath_Apply();
     ChargeManager_Process(&hi2c2);
 
     /* 同时：PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
