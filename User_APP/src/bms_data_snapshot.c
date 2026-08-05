@@ -37,11 +37,36 @@ static float bms_snapshot_temp_c(const bq76942_temp_t *temp)
   return -1.0f;
 }
 
+uint32_t BmsDataSnapshot_PackMv(const bq76942_meas_t *meas)
+{
+  uint32_t sum_mv = 0U;
+  uint8_t i;
+
+  if ((meas == NULL) || !meas->valid) {
+    return 0U;
+  }
+
+  if (meas->pack_mv > 0U) {
+    return meas->pack_mv;
+  }
+
+  if (meas->output_mv > 0U) {
+    return meas->output_mv;
+  }
+
+  for (i = 0U; i < BQ76942_CELL_COUNT; i++) {
+    sum_mv += (uint32_t)meas->cell_mv[i];
+  }
+
+  return sum_mv;
+}
+
 void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
 {
   const bq76942_meas_t *meas;
   const bq76942_temp_t *temp;
   const thermal_status_t *thermal;
+  uint32_t pack_mv;
 
   if (out == NULL) {
     return;
@@ -56,19 +81,21 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
   out->reserved0 = 0u;
   out->reserved1 = 0u;
   out->percentage = -1.0f;
+  out->voltage_v = 0.0f;
+  out->current_a = 0.0f;
 
   if (Soc_IsValid()) {
     out->percentage = (float)Soc_GetPercent() / 100.0f;
   }
 
-  if (meas != NULL && meas->valid && meas->pack_mv > 0U) {
-    out->voltage_v = (float)meas->pack_mv / 1000.0f;
-    /* BQ: + charge / - discharge；协议：放电为正 */
-    out->current_a = -(float)meas->current_ma / 1000.0f;
+  pack_mv = BmsDataSnapshot_PackMv(meas);
+  if (pack_mv > 0U) {
+    out->voltage_v = (float)pack_mv / 1000.0f;
+    if (meas != NULL) {
+      /* BQ: + charge / - discharge；协议：放电为正 */
+      out->current_a = -(float)meas->current_ma / 1000.0f;
+    }
     out->reserved1 = BMS_BATTERY_REPORT_VALID_BIT;
-  } else {
-    out->voltage_v = 0.0f;
-    out->current_a = 0.0f;
   }
 
   out->temperature_c = bms_snapshot_temp_c(temp);

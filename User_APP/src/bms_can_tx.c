@@ -14,6 +14,9 @@
 
 extern FDCAN_HandleTypeDef hfdcan1;
 
+/** FDCAN TX FIFO 深度为 3，连发 4 帧需等待 FIFO 腾出空位 */
+#define BMS_CAN_TX_FIFO_WAIT_MS       10U
+
 static void BMS_CanTx_RecoverIfBusOff(void)
 {
   if ((hfdcan1.Instance == NULL) ||
@@ -28,6 +31,19 @@ static void BMS_CanTx_RecoverIfBusOff(void)
                                      FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
 }
 
+static bool BMS_CanTx_WaitFifoFree(void)
+{
+  uint32_t t0 = HAL_GetTick();
+
+  while (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) < 1U) {
+    if ((HAL_GetTick() - t0) >= BMS_CAN_TX_FIFO_WAIT_MS) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 static bool BMS_CanTx_SendFrame(uint8_t frag_idx, uint8_t frag_total,
                                 const uint8_t *payload, uint16_t offset)
 {
@@ -37,7 +53,8 @@ static bool BMS_CanTx_SendFrame(uint8_t frag_idx, uint8_t frag_total,
   if (hfdcan1.Instance == NULL) {
     return false;
   }
-  if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) < 1U) {
+
+  if (!BMS_CanTx_WaitFifoFree()) {
     return false;
   }
 

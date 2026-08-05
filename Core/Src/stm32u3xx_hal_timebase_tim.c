@@ -45,15 +45,13 @@ HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
   uint32_t              uwPrescalerValue = 0;
   uint32_t              pFLatency;
 
-  /*Configure the TIM6 IRQ priority */
+  /* Configure TIM6 IRQ priority; enable only after htim6 is ready. */
   if (TickPriority < (1UL << __NVIC_PRIO_BITS))
-   {
-     HAL_NVIC_SetPriority(TIM6_IRQn, TickPriority ,0);
-
-     /* Enable the TIM6 global Interrupt */
-     HAL_NVIC_EnableIRQ(TIM6_IRQn);
-     uwTickPrio = TickPriority;
-    }
+  {
+    HAL_NVIC_SetPriority(TIM6_IRQn, TickPriority, 0);
+    HAL_NVIC_DisableIRQ(TIM6_IRQn);
+    uwTickPrio = TickPriority;
+  }
   else
   {
     return HAL_ERROR;
@@ -85,11 +83,15 @@ HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
   htim6.Init.ClockDivision = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
 
-  if(HAL_TIM_Base_Init(&htim6) == HAL_OK)
+  if (HAL_TIM_Base_Init(&htim6) == HAL_OK)
   {
-
-    /* Start the TIM time Base generation in interrupt mode */
-    return HAL_TIM_Base_Start_IT(&htim6);
+    if (HAL_TIM_Base_Start_IT(&htim6) == HAL_OK)
+    {
+      /* Avoid spurious IRQ before Instance was assigned (HardFault on NULL->DIER). */
+      NVIC_ClearPendingIRQ(TIM6_IRQn);
+      HAL_NVIC_EnableIRQ(TIM6_IRQn);
+      return HAL_OK;
+    }
   }
 
   /* Return function status */

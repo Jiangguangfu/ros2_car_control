@@ -30,6 +30,7 @@
 #include "charge_manager.h"
 #include "thermal_manager.h"
 #include "bms_can_tx.h"
+#include "bms_can_debug.h"
 #include "soc_estimator.h"
 #include "uart_battery_report.h"
 #include "main.h"
@@ -186,14 +187,16 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_StartCommonTaskCommon */
 void StartCommonTaskCommon(void *argument)
 {
-  uint32_t count = 0;
   /* USER CODE BEGIN CommTask */
   (void)argument;
-  count = HAL_GetTick();
+  /* 等 ServiceTask 电源时序完成后再发 CAN */
   osDelay(1500);
 
   for (;;) {
     BMS_CanTx_Process();
+#if (BMS_CAN_DEBUG_ENABLE != 0)
+    BMS_CanDebug_Process();
+#endif
     osDelay(BMS_CAN_BATTERY_PERIOD_MS);
   }
   /* USER CODE END CommTask */
@@ -303,7 +306,7 @@ void StartBmsTask(void *argument)
     if (!s_dsg_enabled)
     {
       s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
-      ChargePath_Apply(); /* Restore CFETOFF if imbalance/thermal request */
+      ChargePath_Apply();
     }
 
     osDelay(BMS_TASK_PERIOD_MS);

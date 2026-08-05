@@ -18,6 +18,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
+option(BMS_CAN_DEBUG "Enable CAN 0x48C-0x48F BQ debug frames (bring-up only)" OFF)
+
 # Set the project name
 set(CMAKE_PROJECT_NAME BMS_Project)
 
@@ -47,6 +49,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/app_freertos.c
     User_APP/src/bms_can_tx.c
     User_APP/src/bms_data_snapshot.c
+    User_APP/src/bms_can_debug.c
     User_APP/src/bsp_buzzer.c
     User_APP/src/bsp_ws2812.c
     User_APP/src/bq76942.c
@@ -65,7 +68,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
+    $<$<BOOL:${BMS_CAN_DEBUG}>:BMS_CAN_DEBUG_ENABLE=1>
 )
 
 # Remove wrong libob.a library dependency when using cpp files

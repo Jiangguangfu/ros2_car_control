@@ -9,8 +9,10 @@
 extern "C" {
 #endif
 
+#include "bq76942.h"
 #include "uart_battery_report.h"
 
+uint32_t BmsDataSnapshot_PackMv(const bq76942_meas_t *meas);
 void BmsDataSnapshot_Fill(uart_battery_state_report_t *out);
 
 #ifdef __cplusplus
