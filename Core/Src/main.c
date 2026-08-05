@@ -56,15 +56,7 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-/* 进入 Error_Handler 时的返回地址，GDB 可 Watch；再用 addr2line 定位调用点 */
-volatile uint32_t g_error_lr;
-/* osKernelStart() 返回值：正常不应返回。GDB Watch 此变量 */
-volatile osStatus_t g_kernel_start_status = osOK;
-volatile osStatus_t g_kernel_init_status = osOK;
-/* osErrorISR 诊断：调用前 IPSR/PRIMASK/BASEPRI（线程模式且未屏蔽时应为 0） */
-volatile uint32_t g_ipsr_before_kernel;
-volatile uint32_t g_primask_before_kernel;
-volatile uint32_t g_basepri_before_kernel;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -146,20 +138,12 @@ int main(void)
   /* USER CODE END 2 */
 
   /* Init scheduler */
-  g_ipsr_before_kernel = __get_IPSR();
-  g_primask_before_kernel = __get_PRIMASK();
-  g_basepri_before_kernel = __get_BASEPRI();
-  g_kernel_init_status = osKernelInitialize();
-  if (g_kernel_init_status != osOK)
+  if (osKernelInitialize() != osOK)
   {
     Error_Handler();
   }
   MX_FREERTOS_Init();
-  g_ipsr_before_kernel = __get_IPSR();
-  g_primask_before_kernel = __get_PRIMASK();
-  g_basepri_before_kernel = __get_BASEPRI();
-  g_kernel_start_status = osKernelStart();
-  if (g_kernel_start_status != osOK)
+  if (osKernelStart() != osOK)
   {
     Error_Handler();
   }
@@ -795,7 +779,6 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  g_error_lr = (uint32_t)__builtin_return_address(0);
   __disable_irq();
   while (1)
   {

@@ -60,7 +60,7 @@ extern "C" {
 
 /* Data memory: Calibration:V Divider Offset:Vdiv Offset (I2, userV). */
 #define BQ76942_DM_Vdiv_OFFSET            0x91B2U
-/* cV mode: 100 = 1 V offset for Stack/PACK/LD divider. */
+/* cV mode: 100 = 1 V，写入 Stack/PACK/LD 的 Vdiv Offset (0x91B2)。 */
 #define BQ76942_Vdiv_OFFSET_VALUE         100
 
 /* Stack/PACK userV unit: 1=cV(10mV), 0=mV — match DA Configuration[USER_VOLTS_CV]. */
@@ -129,6 +129,8 @@ bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
                              const uint8_t *data, uint8_t len);
 /** Write Vdiv Offset to 0x91B2 (requires CONFIG_UPDATE). Call once at init. */
 bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv);
+/** 上电后写入 Vdiv Offset（包电压校准），成功返回 true。 */
+bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c);
 
 bool BQ76942_SubCommandWrite(I2C_HandleTypeDef *hi2c, uint16_t subcmd);
 bool BQ76942_SubCommandRead(I2C_HandleTypeDef *hi2c, uint16_t subcmd,

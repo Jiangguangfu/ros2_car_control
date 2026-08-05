@@ -258,6 +258,21 @@ bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv)
   return true;
 }
 
+bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
+{
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  if (!BQ76942_IsReady(hi2c))
+  {
+    return false;
+  }
+
+  return BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
+}
+
 bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out)
 {
   uint16_t raw_u16;

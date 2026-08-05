@@ -30,6 +30,7 @@
 #include "charge_manager.h"
 #include "thermal_manager.h"
 #include "bms_can_tx.h"
+#include "soc_estimator.h"
 #include "uart_battery_report.h"
 #include "main.h"
 
@@ -42,7 +43,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define BMS_TASK_PERIOD_MS                500U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -210,18 +211,6 @@ void StartServiceTask(void *argument)
   /* USER CODE BEGIN ServiceTask */
   (void)argument;
 
-  /* BQ FET + 电源时序（CommTask 等 1500ms 后再发 CAN） */
-  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
-  osDelay(300);
-  HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
-  osDelay(300);
-  HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
-  osDelay(200);
-  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
-  osDelay(100);
-
   for (;;) {
     osDelay(1000);
   }
@@ -265,6 +254,7 @@ void StartBmsTask(void *argument)
 {
   /* USER CODE BEGIN BmsTask */
   static bool s_dsg_enabled = false;
+  static bool s_bq_calibrated = false;
   (void)argument;
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
@@ -272,9 +262,15 @@ void StartBmsTask(void *argument)
   ChargePath_Init();
   ChargeManager_Init();
   Balance_Init();
+  Soc_Init();
 
   for (;;)
   {
+    if (!s_bq_calibrated)
+    {
+      s_bq_calibrated = BQ76942_InitCalibration(&hi2c2);
+    }
+
     if (BQ76942_ReadTemperatures(&hi2c2, &s_bq_temp))
     {
       s_bq_temp_fail_count = 0U;
@@ -291,13 +287,15 @@ void StartBmsTask(void *argument)
     if (BQ76942_ReadMeasurements(&hi2c2, &s_bq_meas))
     {
       s_bq_meas_fail_count = 0U;
-      /* cell_mv[] mV, pack_mv/output_mv mV, current_ma=CC2, current_cc3_ma=CC3 */
     }
     else
     {
       s_bq_meas.valid = false;
       s_bq_meas_fail_count++;
     }
+
+    Soc_Process(&s_bq_meas, BMS_TASK_PERIOD_MS);
+    Balance_SetSoc(Soc_GetPercent(), Soc_IsValid());
 
     ChargeManager_Process(&hi2c2);
 
@@ -308,7 +306,7 @@ void StartBmsTask(void *argument)
       ChargePath_Apply(); /* Restore CFETOFF if imbalance/thermal request */
     }
 
-    osDelay(500);
+    osDelay(BMS_TASK_PERIOD_MS);
   }
   /* USER CODE END BmsTask */
 }

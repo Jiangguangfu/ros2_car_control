@@ -6,6 +6,7 @@
 
 #include "app_freertos.h"
 #include "bq76942.h"
+#include "soc_estimator.h"
 #include "thermal_manager.h"
 
 static float bms_snapshot_temp_c(const bq76942_temp_t *temp)
@@ -55,6 +56,10 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
   out->reserved0 = 0u;
   out->reserved1 = 0u;
   out->percentage = -1.0f;
+
+  if (Soc_IsValid()) {
+    out->percentage = (float)Soc_GetPercent() / 100.0f;
+  }
 
   if (meas != NULL && meas->valid && meas->pack_mv > 0U) {
     out->voltage_v = (float)meas->pack_mv / 1000.0f;
