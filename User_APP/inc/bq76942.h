@@ -37,8 +37,8 @@ extern "C" {
 #define BQ76942_CMD_TS2_TEMP              0x72U
 #define BQ76942_CMD_TS3_TEMP              0x74U
 
-#define BQ76942_CMD_SAFETY_STATUS_A       0x05U
-#define BQ76942_CMD_SAFETY_STATUS_B       0x06U
+#define BQ76942_CMD_SAFETY_STATUS_A       0x03U
+#define BQ76942_CMD_SAFETY_STATUS_B       0x05U
 #define BQ76942_CMD_SAFETY_STATUS_C       0x07U
 
 /* Subcommand mailbox */
@@ -58,10 +58,25 @@ extern "C" {
 /* Offset of CC3 Current (I2, userA) within DASTATUS5 transfer buffer. */
 #define BQ76942_DASTATUS5_CC3_OFFSET      20U
 
+/* Data memory: Calibration:Current (IEEE-754 F4, little-endian). */
+#define BQ76942_DM_CC_GAIN                0x91A8U
+#define BQ76942_DM_CAPACITY_GAIN          0x91ACU
+/* CC Gain = 7.4768 / (Rsense_mOhm); Capacity Gain = CC Gain × 298261.6178. */
+#define BQ76942_CC_GAIN_RSENSE_FACTOR     7.4768f
+#define BQ76942_CAPACITY_GAIN_FACTOR      298261.6178f
+
 /* Data memory: Calibration:V Divider Offset:Vdiv Offset (I2, userV). */
 #define BQ76942_DM_Vdiv_OFFSET            0x91B2U
 /* cV mode: 100 = 1 V，写入 Stack/PACK/LD 的 Vdiv Offset (0x91B2)。 */
 #define BQ76942_Vdiv_OFFSET_VALUE         100
+
+/* 采样电阻 (mΩ)；实测电流偏大约 1.58 倍时 CC Gain 再除以该比值。 */
+#ifndef BQ76942_SENSE_RESISTOR_MOHM
+#define BQ76942_SENSE_RESISTOR_MOHM       1.0f
+#endif
+#ifndef BQ76942_CC_GAIN_MEASURED_RATIO
+#define BQ76942_CC_GAIN_MEASURED_RATIO    1.58f/*实测CC2电流与实际电流的比值*/
+#endif
 
 /* Stack/PACK userV unit: 1=cV(10mV), 0=mV — match DA Configuration[USER_VOLTS_CV]. */
 #ifndef BQ76942_USERV_IS_CV
@@ -80,7 +95,7 @@ extern "C" {
 /* 0x0057 Manufacturing Status bits */
 #define BQ76942_MFG_FET_EN                (1U << 4)
 
-/* 0x7F FET Status bits (common BQ769x2 mapping) */
+/* 0x7F FET Status — TRM 12.2.20 */
 #define BQ76942_FETSTAT_CHG_FET           (1U << 0)
 #define BQ76942_FETSTAT_PCHG_FET          (1U << 1)
 #define BQ76942_FETSTAT_DSG_FET           (1U << 2)
@@ -109,8 +124,8 @@ typedef struct
 typedef struct
 {
   uint16_t cell_mv[BQ76942_CELL_COUNT]; /* per-cell voltage, mV */
-  uint32_t pack_mv;                     /* Stack (0x34), mV */
-  uint32_t output_mv;                   /* PACK pin (0x36), mV */
+  uint32_t pack_mv;                     /* Stack (0x34), 电池组顶部的 16 位电压mV */
+  uint32_t output_mv;                   /* PACK pin (0x36),PACK 引脚上的 16 位电压 mV */
   int16_t current_ma;                   /* CC2 (0x3A), mA (+ charge / - discharge) */
   int16_t current_cc3_ma;               /* CC3 avg of CC2 samples, mA (DASTATUS5) */
   uint16_t vcell_min_mv;
@@ -129,7 +144,9 @@ bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
                              const uint8_t *data, uint8_t len);
 /** Write Vdiv Offset to 0x91B2 (requires CONFIG_UPDATE). Call once at init. */
 bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv);
-/** 上电后写入 Vdiv Offset（包电压校准），成功返回 true。 */
+/** Write CC Gain (0x91A8) + Capacity Gain (0x91AC); requires CONFIG_UPDATE. */
+bool BQ76942_WriteCcGain(I2C_HandleTypeDef *hi2c, float cc_gain);
+/** 上电后写入 Vdiv Offset + CC Gain 校准，成功返回 true。 */
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c);
 
 bool BQ76942_SubCommandWrite(I2C_HandleTypeDef *hi2c, uint16_t subcmd);

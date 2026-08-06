@@ -7,6 +7,7 @@
 #include "bq76942.h"
 #include "main.h"
 #include "cmsis_os2.h"
+#include <string.h>
 
 #define BQ76942_I2C_TIMEOUT_MS            50U
 #define BQ76942_SUBCMD_WAIT_MS            2U
@@ -231,6 +232,18 @@ bool BQ76942_SubCommandReadU16(I2C_HandleTypeDef *hi2c, uint16_t subcmd, uint16_
   return true;
 }
 
+static void BQ76942_FloatToLeBytes(float value, uint8_t out[4])
+{
+  union
+  {
+    float f;
+    uint8_t b[4];
+  } u;
+
+  u.f = value;
+  (void)memcpy(out, u.b, sizeof(u.b));
+}
+
 bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv)
 {
   uint8_t val[2];
@@ -238,28 +251,37 @@ bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv)
   val[0] = (uint8_t)((uint16_t)offset_userv & 0xFFU);
   val[1] = (uint8_t)(((uint16_t)offset_userv >> 8) & 0xFFU);
 
-  if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE))
-  {
-    return false;
-  }
-  osDelay(10);
+  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_Vdiv_OFFSET, val, sizeof(val));
+}
 
-  if (!BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_Vdiv_OFFSET, val, sizeof(val)))
+bool BQ76942_WriteCcGain(I2C_HandleTypeDef *hi2c, float cc_gain)
+{
+  uint8_t cc_bytes[4];
+  uint8_t cap_bytes[4];
+  float capacity_gain;
+
+  if (hi2c == NULL)
   {
-    (void)BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE_EXIT);
     return false;
   }
 
-  if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE_EXIT))
+  BQ76942_FloatToLeBytes(cc_gain, cc_bytes);
+  capacity_gain = cc_gain * BQ76942_CAPACITY_GAIN_FACTOR;
+  BQ76942_FloatToLeBytes(capacity_gain, cap_bytes);
+
+  if (!BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_CC_GAIN, cc_bytes, sizeof(cc_bytes)))
   {
     return false;
   }
-  osDelay(10);
-  return true;
+
+  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_CAPACITY_GAIN, cap_bytes, sizeof(cap_bytes));
 }
 
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
 {
+  float cc_gain;
+  bool ok;
+
   if (hi2c == NULL)
   {
     return false;
@@ -270,7 +292,24 @@ bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
     return false;
   }
 
-  return BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
+  cc_gain = BQ76942_CC_GAIN_RSENSE_FACTOR / BQ76942_SENSE_RESISTOR_MOHM;
+  cc_gain /= BQ76942_CC_GAIN_MEASURED_RATIO;
+
+  if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE))
+  {
+    return false;
+  }
+  osDelay(10);
+
+  ok = BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
+  ok = ok && BQ76942_WriteCcGain(hi2c, cc_gain);
+
+  if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE_EXIT))
+  {
+    ok = false;
+  }
+  osDelay(10);
+  return ok;
 }
 
 bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out)

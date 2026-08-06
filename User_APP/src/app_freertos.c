@@ -33,6 +33,7 @@
 #include "bms_can_debug.h"
 #include "bms_can_ext_tx.h"
 #include "soc_estimator.h"
+#include "soh_estimator.h"
 #include "uart_battery_report.h"
 #include "main.h"
 
@@ -260,6 +261,7 @@ void StartBmsTask(void *argument)
   /* USER CODE BEGIN BmsTask */
   static bool s_dsg_enabled = false;
   static bool s_bq_calibrated = false;
+  static bool s_bq_protect = false;
   (void)argument;
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
@@ -268,6 +270,7 @@ void StartBmsTask(void *argument)
   ChargeManager_Init();
   Balance_Init();
   Soc_Init();
+  Soh_Init();
 
   for (;;)
   {
@@ -303,7 +306,21 @@ void StartBmsTask(void *argument)
     ChargePath_Apply();
     ChargeManager_Process(&hi2c2);
 
-    /* 同时：PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
+    (void)BQ76942_ReadSafetyStatus(&hi2c2, &s_bq_protect);
+
+    {
+      soh_inputs_t soh_in = {
+          .meas = &s_bq_meas,
+          .temp = &s_bq_temp,
+          .thermal = Thermal_GetStatus(),
+          .charge_state = ChargeManager_GetState(),
+          .bq_protect = s_bq_protect,
+          .comm_fail_count = Bms_GetBqCommFailCount(),
+      };
+      Soh_Process(&soh_in, BMS_TASK_PERIOD_MS);
+    }
+
+    /* PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
     if (!s_dsg_enabled)
     {
       s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
