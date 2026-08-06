@@ -16,10 +16,23 @@ cmake --build build/Debug --target BMS_Project --parallel
 
 Output: `build/Debug/BMS_Project.elf`
 
+## CAN 通信
+
+BMS 无对外 UART，电池数据经 **CAN** 上报底盘（500 kbit/s，FDCAN PA11/PA12）。
+
+| CAN ID | 内容 | 周期 |
+|--------|------|------|
+| **0x48B** | 电池状态（电压、电流、SOC、温度） | 5 Hz |
+| **0x49A** | 告警 + 扩展（单体电压、双温、双电流等） | 1 Hz |
+
+协议与 payload 布局详见 **[docs/BMS_CAN.md](docs/BMS_CAN.md)**。
+
+联调调试帧 `0x48C`–`0x48F`：CMake `-DBMS_CAN_DEBUG=ON`（量产默认关闭）。
+
 ## 软件架构
 
 ```
-CommTask          — 通信（预留）
+CommTask          — CAN 上报（0x48B / 0x49A，5 Hz 调度）
 ServiceTask       — 上电、外设供电
 PowerTask         — thermal_manager（200 ms）
 BmsTask           — BQ76942 采样 + cell_balance_manager（500 ms）
@@ -237,14 +250,25 @@ const balance_status_t *Balance_GetStatus(void);
 ## 目录结构（User_APP）
 
 ```
+docs/
+  BMS_CAN.md              — CAN 协议说明（0x48B / 0x49A）
 User_APP/
   inc/
+    can_uart_transport.h
+    uart_battery_report.h
+    uart_battery_ext_report.h
+    bms_can_tx.h
+    bms_can_ext_tx.h
     bq76942.h
     cell_balance_manager.h
     charge_path.h
     thermal_manager.h
     app_freertos.h
   src/
+    bms_can_tx.c
+    bms_can_ext_tx.c
+    bms_data_snapshot.c
+    bms_ext_snapshot.c
     bq76942.c
     cell_balance_manager.c
     charge_path.c

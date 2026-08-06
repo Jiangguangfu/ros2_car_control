@@ -48,7 +48,9 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/app_freertos.c
     User_APP/src/bms_can_tx.c
+    User_APP/src/bms_can_ext_tx.c
     User_APP/src/bms_data_snapshot.c
+    User_APP/src/bms_ext_snapshot.c
     User_APP/src/bms_can_debug.c
     User_APP/src/bsp_buzzer.c
     User_APP/src/bsp_ws2812.c

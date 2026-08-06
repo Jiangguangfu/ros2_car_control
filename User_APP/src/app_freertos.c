@@ -31,6 +31,7 @@
 #include "thermal_manager.h"
 #include "bms_can_tx.h"
 #include "bms_can_debug.h"
+#include "bms_can_ext_tx.h"
 #include "soc_estimator.h"
 #include "uart_battery_report.h"
 #include "main.h"
@@ -194,6 +195,7 @@ void StartCommonTaskCommon(void *argument)
 
   for (;;) {
     BMS_CanTx_Process();
+    BMS_CanExtTx_Process();
 #if (BMS_CAN_DEBUG_ENABLE != 0)
     BMS_CanDebug_Process();
 #endif

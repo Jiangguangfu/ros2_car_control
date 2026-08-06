@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bms_can_tx.h"
+#include "bms_can_ext_tx.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -135,6 +136,7 @@ int main(void)
                                      FDCAN_REJECT, FDCAN_REJECT,
                                      FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
   BMS_CanTx_Init();
+  BMS_CanExtTx_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
