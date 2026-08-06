@@ -79,7 +79,7 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
 
   out->series_cells = (uint8_t)BQ76942_CELL_COUNT;
   out->present = 1u;
-  out->reserved0 = 0u;
+  out->reserved0 = Soc_GetSohPercent();
   out->reserved1 = 0u;
   out->percentage = -1.0f;
   out->voltage_v = 0.0f;

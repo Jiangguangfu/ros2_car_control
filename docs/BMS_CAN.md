@@ -62,14 +62,16 @@ Byte 2–7 payload 连续 6 字节
 |------|------|------|------|
 | 0 | `series_cells` | uint8 | 串联节数（6S = 6） |
 | 1 | `present` | uint8 | 1 = 电池存在 |
-| 2 | `reserved0` | uint8 | SOH 0~100（**当前固定 0，未实现**） |
+| 2 | `reserved0` | uint8 | SOH 0~100（容量衰减：实测满充 / 标称；未学习前默认 **100**） |
 | 3 | `reserved1` | uint8 | bit0 = `BMS_BATTERY_REPORT_VALID_BIT`（BMS CAN 数据有效） |
 | 4–7 | `voltage_v` | float | 包电压（V），来自 BQ Stack `pack_mv` / 回退逻辑 |
 | 8–11 | `current_a` | float | 电流（A），**放电为正** |
 | 12–15 | `percentage` | float | SOC **0.0~1.0**；未知时为 **-1.0** |
 | 16–19 | `temperature_c` | float | 温度（℃）；未知时为 **-1.0** |
 
-**数据来源**：`BmsDataSnapshot_Fill()` ← BQ76942 测量 + `soc_estimator` + 热管理。
+**数据来源**：`BmsDataSnapshot_Fill()` ← BQ76942 测量 + `soc_estimator`（SOC/SOH）+ 热管理。
+
+**SOH（方案 B）**：充电会话中库仑计积分；自低 SOC（≤25%）起充至满充，或单次充电增量 ≥ 标称 50% 时，用「起始剩余 + 充入容量」更新 `learned_full`；`SOH = learned_full / 标称 × 100`。断电不保存 learned（重启后 SOH 回到 100% 直至再次满充学习）。
 
 **发送**：`BMS_CanTx_Process()`（`CommTask`，`BMS_CAN_BATTERY_PERIOD_MS` = 200 ms）。
 
