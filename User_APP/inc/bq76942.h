@@ -65,6 +65,12 @@ extern "C" {
 #define BQ76942_CC_GAIN_RSENSE_FACTOR     7.4768f
 #define BQ76942_CAPACITY_GAIN_FACTOR      298261.6178f
 
+/* Data memory: Protections:SCD:Delay (U1, 1–31 → (N-1)×15µs). */
+#define BQ76942_DM_SCD_DELAY              0x9287U
+#ifndef BQ76942_SCD_DELAY
+#define BQ76942_SCD_DELAY                 0x05U /* (5-1)×15µs = 60µs */
+#endif
+
 /* Data memory: Calibration:V Divider Offset:Vdiv Offset (I2, userV). */
 #define BQ76942_DM_Vdiv_OFFSET            0x91B2U
 /* cV mode: 100 = 1 V，写入 Stack/PACK/LD 的 Vdiv Offset (0x91B2)。 */
@@ -146,6 +152,8 @@ bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
 bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv);
 /** Write CC Gain (0x91A8) + Capacity Gain (0x91AC); requires CONFIG_UPDATE. */
 bool BQ76942_WriteCcGain(I2C_HandleTypeDef *hi2c, float cc_gain);
+/** Write Protections:SCD:Delay @ 0x9287; requires CONFIG_UPDATE. */
+bool BQ76942_WriteScdDelay(I2C_HandleTypeDef *hi2c, uint8_t delay_code);
 /** 上电后写入 Vdiv Offset + CC Gain 校准，成功返回 true。 */
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c);
 

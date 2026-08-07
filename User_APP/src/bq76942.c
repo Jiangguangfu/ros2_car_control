@@ -277,6 +277,16 @@ bool BQ76942_WriteCcGain(I2C_HandleTypeDef *hi2c, float cc_gain)
   return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_CAPACITY_GAIN, cap_bytes, sizeof(cap_bytes));
 }
 
+bool BQ76942_WriteScdDelay(I2C_HandleTypeDef *hi2c, uint8_t delay_code)
+{
+  if ((hi2c == NULL) || (delay_code == 0U))
+  {
+    return false;
+  }
+
+  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_SCD_DELAY, &delay_code, 1U);
+}
+
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
 {
   float cc_gain;
@@ -303,6 +313,7 @@ bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
 
   ok = BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
   ok = ok && BQ76942_WriteCcGain(hi2c, cc_gain);
+  ok = ok && BQ76942_WriteScdDelay(hi2c, BQ76942_SCD_DELAY);
 
   if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE_EXIT))
   {
