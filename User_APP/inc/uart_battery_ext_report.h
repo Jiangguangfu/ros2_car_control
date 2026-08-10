@@ -23,6 +23,7 @@ extern "C" {
 #define BMS_EXT_SOURCE_THERMAL    (1u << 1)
 #define BMS_EXT_SOURCE_CHARGE     (1u << 2)
 #define BMS_EXT_SOURCE_BALANCE    (1u << 3)
+#define BMS_EXT_SOURCE_PROTECT    (1u << 4)
 
 /** alarm_flags */
 #define BMS_EXT_ALARM_OVP              (1u << 0)
@@ -36,6 +37,7 @@ extern "C" {
 #define BMS_EXT_ALARM_CHG_INHIBIT      (1u << 8)
 #define BMS_EXT_ALARM_DSG_INHIBIT      (1u << 9)
 #define BMS_EXT_ALARM_CHARGE_FAULT     (1u << 10)
+#define BMS_EXT_ALARM_SHORT_CIRCUIT    (1u << 11)
 
 typedef struct __attribute__((packed)) {
   uint32_t alarm_flags;

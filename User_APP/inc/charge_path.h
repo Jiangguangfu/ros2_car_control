@@ -30,6 +30,9 @@ void ChargePath_SetImbalanceChargeInhibit(bool charge_off);
 /** Charge manager: inhibit when idle/stop/complete/fault; allow when CHARGING. */
 void ChargePath_SetChargeManagerInhibit(bool charge_off);
 
+/** Overcurrent / short-circuit protect manager. */
+void ChargePath_SetProtectInhibit(bool charge_off, bool discharge_off);
+
 /** Drive CFETOFF/DFETOFF from OR of all requests. */
 void ChargePath_Apply(void);
 

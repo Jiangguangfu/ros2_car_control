@@ -29,6 +29,7 @@
 #include "charge_path.h"
 #include "charge_manager.h"
 #include "thermal_manager.h"
+#include "bsp_power_rails.h"
 #include "bms_can_tx.h"
 #include "bms_can_debug.h"
 #include "bms_can_ext_tx.h"
@@ -60,6 +61,7 @@ extern I2C_HandleTypeDef hi2c2;
 
 static bq76942_temp_t s_bq_temp;
 static bq76942_meas_t s_bq_meas;
+static bq76942_safety_t s_bq_safety;
 static uint32_t s_bq_temp_fail_count;
 static uint32_t s_bq_comm_fail_count;
 static uint32_t s_bq_meas_fail_count;
@@ -104,6 +106,11 @@ const bq76942_temp_t *Bms_GetBqTemperatures(void)
 const bq76942_meas_t *Bms_GetBqMeasurements(void)
 {
   return &s_bq_meas;
+}
+
+const bq76942_safety_t *Bms_GetBqSafety(void)
+{
+  return &s_bq_safety;
 }
 
 uint32_t Bms_GetBqTempFailCount(void)
@@ -239,10 +246,12 @@ void StartPowerTask(void *argument)
   osDelay(500);
   ChargePath_Init();
   Thermal_Init();
+  Protect_Init();
 
   for (;;)
   {
     Thermal_Process();
+    Protect_Process();
     ChargePath_Apply();
     osDelay(200);
   }
@@ -261,7 +270,6 @@ void StartBmsTask(void *argument)
   /* USER CODE BEGIN BmsTask */
   static bool s_dsg_enabled = false;
   static bool s_bq_calibrated = false;
-  static bool s_bq_protect = false;
   (void)argument;
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
@@ -306,7 +314,10 @@ void StartBmsTask(void *argument)
     ChargePath_Apply();
     ChargeManager_Process(&hi2c2);
 
-    (void)BQ76942_ReadSafetyStatus(&hi2c2, &s_bq_protect);
+    if (!BQ76942_ReadSafetyStatusEx(&hi2c2, &s_bq_safety))
+    {
+      s_bq_safety.valid = false;
+    }
 
     {
       soh_inputs_t soh_in = {
@@ -314,17 +325,23 @@ void StartBmsTask(void *argument)
           .temp = &s_bq_temp,
           .thermal = Thermal_GetStatus(),
           .charge_state = ChargeManager_GetState(),
-          .bq_protect = s_bq_protect,
+          .bq_protect = s_bq_safety.valid && s_bq_safety.any,
           .comm_fail_count = Bms_GetBqCommFailCount(),
       };
       Soh_Process(&soh_in, BMS_TASK_PERIOD_MS);
     }
 
-    /* PC13 24V Bypass + BQ DSG FET；失败则周期重试 */
-    if (!s_dsg_enabled)
+    /* BQ DSG FET；失败则周期重试（24V GPIO 由电源轨仲裁）。 */
+    if (!s_dsg_enabled &&
+        (Protect_GetState() < PROTECT_STATE_FAULT) &&
+        (Thermal_GetState() < THERMAL_STATE_FAULT))
     {
       s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
       ChargePath_Apply();
+    }
+    else if (Protect_GetState() == PROTECT_STATE_FAULT)
+    {
+      s_dsg_enabled = false;
     }
 
     osDelay(BMS_TASK_PERIOD_MS);

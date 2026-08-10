@@ -8,11 +8,10 @@
 #include "bq76942.h"
 #include "cell_balance_manager.h"
 #include "charge_manager.h"
+#include "bsp_power_rails.h"
 #include "thermal_manager.h"
 
 #include <string.h>
-
-extern I2C_HandleTypeDef hi2c2;
 
 #define BMS_EXT_COMM_FAIL_THRESHOLD  3U
 
@@ -30,12 +29,13 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
   const bq76942_meas_t *meas;
   const bq76942_temp_t *temp;
   const thermal_status_t *thermal;
+  const protect_status_t *protect;
   const charge_status_t *charge;
   const balance_status_t *balance;
+  const bq76942_safety_t *safety;
   uint32_t alarm = 0U;
   uint8_t severity = BMS_EXT_SEVERITY_NONE;
   uint8_t source = 0U;
-  bool bq_protect = false;
   uint8_t i;
 
   if (out == NULL) {
@@ -45,8 +45,10 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
   meas = Bms_GetBqMeasurements();
   temp = Bms_GetBqTemperatures();
   thermal = Thermal_GetStatus();
+  protect = Protect_GetStatus();
   charge = ChargeManager_GetStatus();
   balance = Balance_GetStatus();
+  safety = Bms_GetBqSafety();
 
   (void)memset(out, 0, sizeof(*out));
 
@@ -137,14 +139,43 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
     alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COMM_FAIL);
   }
 
-  if (BQ76942_ReadSafetyStatus(&hi2c2, &bq_protect) && bq_protect) {
+  if (protect != NULL) {
+    source = (uint8_t)(source | BMS_EXT_SOURCE_PROTECT);
+
+    if (protect->state == PROTECT_STATE_FAULT) {
+      if (protect->reason == PROTECT_REASON_SCD) {
+        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_SHORT_CIRCUIT |
+                           BMS_EXT_ALARM_OCP | BMS_EXT_ALARM_BQ_PROTECT);
+      } else if ((protect->reason == PROTECT_REASON_OCD) ||
+                 (protect->reason == PROTECT_REASON_SOFT_OCD) ||
+                 (protect->reason == PROTECT_REASON_OCC)) {
+        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OCP);
+        if (protect->reason != PROTECT_REASON_SOFT_OCD) {
+          alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BQ_PROTECT);
+        }
+      }
+    } else if (protect->state == PROTECT_STATE_WARN) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OCP);
+    }
+
+    if (protect->charge_inhibit) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_CHG_INHIBIT);
+    }
+    if (protect->discharge_inhibit) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_DSG_INHIBIT);
+    }
+  }
+
+  if ((safety != NULL) && safety->valid && safety->any) {
     alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BQ_PROTECT);
   }
 
   if (alarm != 0U) {
     if ((alarm & (BMS_EXT_ALARM_BQ_PROTECT |
                   BMS_EXT_ALARM_CHARGE_FAULT |
-                  BMS_EXT_ALARM_OVERTEMP)) != 0U) {
+                  BMS_EXT_ALARM_OVERTEMP |
+                  BMS_EXT_ALARM_SHORT_CIRCUIT |
+                  BMS_EXT_ALARM_OCP)) != 0U) {
       severity = BMS_EXT_SEVERITY_CRITICAL;
     } else {
       severity = BMS_EXT_SEVERITY_WARN;

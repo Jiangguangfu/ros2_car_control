@@ -93,7 +93,8 @@ static void Thermal_ApplyActuators(void)
   s_status.fan_duty_percent = duty;
   s_status.power_rails_mask = pwr_mask;
   BSP_Fan_SetDutyPercent(duty);
-  BSP_PowerRails_ApplyMask(pwr_mask);
+  BSP_PowerRails_SetRequest(PWR_REQ_THERMAL, pwr_mask);
+  BSP_PowerRails_Apply();
   Thermal_SetFetOff(chg_off, dsg_off);
 }
 
