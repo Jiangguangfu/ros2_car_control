@@ -6,7 +6,7 @@
  */
 #include "cell_balance_manager.h"
 #include "bq76942.h"
-#include "thermal_manager.h"
+#include "bsp_power_rails.h"
 #include "charge_path.h"
 #include "app_freertos.h"
 
@@ -176,7 +176,7 @@ static bool Balance_EvalTemperature(void)
   return true;
 }
 
-static bool Balance_EvalCriticalFault(const thermal_status_t *thermal,
+static bool Balance_EvalCriticalFault(const pwr_rails_status_t *protect,
                                       bool bq_protect,
                                       uint32_t comm_fail_count)
 {
@@ -192,8 +192,8 @@ static bool Balance_EvalCriticalFault(const thermal_status_t *thermal,
     return true;
   }
 
-  if ((thermal != NULL) &&
-      ((thermal->state >= THERMAL_STATE_LIMIT) || (!thermal->sensor_ok)))
+  if ((protect != NULL) &&
+      ((protect->state >= PWR_STATE_LIMIT) || (!protect->sensor_ok)))
   {
     s_status.inhibit_reason = BALANCE_INHIBIT_THERMAL;
     return true;
@@ -384,7 +384,7 @@ const balance_status_t *Balance_GetStatus(void)
 void Balance_Process(I2C_HandleTypeDef *hi2c)
 {
   bq76942_cells_t cells;
-  const thermal_status_t *thermal = Thermal_GetStatus();
+  const pwr_rails_status_t *thermal = BSP_PowerRails_GetStatus();
   uint32_t comm_fail = Bms_GetBqCommFailCount();
   bool sample_ok;
   bool temperature_normal;

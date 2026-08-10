@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    bsp_power_rails.h
- * @brief   Multi-rail power output management (24/19/12/6.5/5 V).
+ * @brief   Multi-rail power + unified protect (thermal / BQ OC-SC / soft OCD).
  *
  * GPIO mapping (active-high enable):
  *   24V  — PC13 PWR_24V_BYPASS_EN
@@ -9,10 +9,6 @@
  *   12V  — PA8  PER_12V_EN
  *   6.5V — PB15 PWR_7V5_EN (hardware 7V5 label)
  *   5V   — no dedicated EN; follows 6.5V bus LDO (software-linked)
- *
- * Sources AND into final enable mask:
- *   - thermal manager request
- *   - OC/SC protect policy (BQ SCD/OCD/OCC + soft discharge OC)
  ******************************************************************************
  */
 #ifndef BSP_POWER_RAILS_H
@@ -35,13 +31,6 @@ typedef enum
   PWR_RAIL_COUNT
 } pwr_rail_id_t;
 
-typedef enum
-{
-  PWR_REQ_THERMAL = 0,
-  PWR_REQ_PROTECT,
-  PWR_REQ_COUNT
-} pwr_req_source_t;
-
 #define PWR_MASK_24V   (1u << PWR_RAIL_24V)
 #define PWR_MASK_19V   (1u << PWR_RAIL_19V)
 #define PWR_MASK_12V   (1u << PWR_RAIL_12V)
@@ -50,55 +39,75 @@ typedef enum
 #define PWR_MASK_ALL   (PWR_MASK_24V | PWR_MASK_19V | PWR_MASK_12V | \
                         PWR_MASK_6V5 | PWR_MASK_5V)
 
+typedef enum
+{
+  PWR_STATE_NORMAL = 0,
+  PWR_STATE_WARN,
+  PWR_STATE_LIMIT,
+  PWR_STATE_FAULT
+} pwr_state_t;
+
+typedef enum
+{
+  PWR_REASON_NONE = 0,
+  PWR_REASON_HOT,
+  PWR_REASON_COLD_CHARGE,
+  PWR_REASON_SENSOR,
+  PWR_REASON_SCD,/*放电短路安全警报*/
+  PWR_REASON_OCD,/*放电过流安全警报*/
+  PWR_REASON_OCC,/*充电过流安全警报*/
+  PWR_REASON_SOFT_OCD/*软过流安全警报*/
+} pwr_reason_t;
+
 typedef struct
 {
+  /* Actuation */
   bool rail_on[PWR_RAIL_COUNT];
   uint8_t enabled_mask;
-  uint8_t request_mask[PWR_REQ_COUNT];
-} pwr_rails_status_t;
-
-typedef enum
-{
-  PROTECT_STATE_NORMAL = 0,
-  PROTECT_STATE_WARN,
-  PROTECT_STATE_FAULT
-} protect_state_t;
-
-typedef enum
-{
-  PROTECT_REASON_NONE = 0,
-  PROTECT_REASON_SCD,
-  PROTECT_REASON_OCD,
-  PROTECT_REASON_OCC,
-  PROTECT_REASON_SOFT_OCD
-} protect_reason_t;
-
-typedef struct
-{
-  protect_state_t state;
-  protect_reason_t reason;
   uint8_t power_rails_mask;
+  uint8_t fan_duty_percent;
   bool charge_inhibit;
   bool discharge_inhibit;
+
+  /* Combined severity (thermal vs current protect). */
+  pwr_state_t state;
+  pwr_reason_t reason;
   bool latched;
-  bool safety_ok;
+
+  /* Thermal sensors */
+  int16_t tmax_c_x10;
+  int16_t tmin_c_x10;
+  int16_t die_c_x10;
+  bool sensor_ok;
+
+  /* BQ Safety Status (raw A/B/C + parsed current faults). */
   uint8_t status_a;
+  uint8_t status_b;
+  uint8_t status_c;
+  bool scd;
+  bool ocd;
+  bool occ;
+  bool bq_any;
+  bool bq_valid;
+
   int16_t pack_current_ma;
-} protect_status_t;
+} pwr_rails_status_t;
 
 void BSP_PowerRails_Init(void);
 void BSP_PowerRails_BootSequence(void);
-void BSP_PowerRails_SetRequest(pwr_req_source_t source, uint8_t enable_mask);
-void BSP_PowerRails_Apply(void);
-void BSP_PowerRails_ApplyMask(uint8_t enable_mask);
-const pwr_rails_status_t *BSP_PowerRails_GetStatus(void);
 
-/** OC/SC policy → rails + charge_path inhibit. Call from PowerTask. */
-void Protect_Init(void);
-void Protect_Process(void);
-const protect_status_t *Protect_GetStatus(void);
-protect_state_t Protect_GetState(void);
-bool Protect_ClearFault(void);
+/** Cache Safety A/B/C from BmsTask and parse SCD/OCD/OCC. */
+void BSP_PowerRails_UpdateBqSafety(uint8_t status_a, uint8_t status_b,
+                                   uint8_t status_c, bool valid);
+
+/** Evaluate thermal + OC/SC and drive rails / fan / FET. Call from PowerTask. */
+void BSP_PowerRails_Process(void);
+
+const pwr_rails_status_t *BSP_PowerRails_GetStatus(void);
+pwr_state_t BSP_PowerRails_GetState(void);
+
+/** Clear latched FAULT when thermal/current conditions allow. */
+bool BSP_PowerRails_ClearFault(void);
 
 #ifdef __cplusplus
 }

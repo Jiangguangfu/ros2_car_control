@@ -355,8 +355,8 @@ static uint32_t Soh_CollectAlarms(const soh_inputs_t *inputs)
     alarms |= SOH_ALARM_BQ_PROTECT;
   }
 
-  if ((inputs->thermal != NULL) &&
-      (inputs->thermal->state >= THERMAL_STATE_WARN))
+  if ((inputs->protect != NULL) &&
+      (inputs->protect->state >= PWR_STATE_WARN))
   {
     alarms |= SOH_ALARM_THERMAL;
   }

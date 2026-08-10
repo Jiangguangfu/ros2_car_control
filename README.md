@@ -33,17 +33,30 @@ BMS 无对外 UART，电池数据经 **CAN** 上报底盘（500 kbit/s，FDCAN P
 
 ```
 CommTask          — CAN 上报（0x48B / 0x49A，5 Hz 调度）
-ServiceTask       — 上电、外设供电
-PowerTask         — thermal_manager（200 ms）
-BmsTask           — BQ76942 采样 + cell_balance_manager（500 ms）
+ServiceTask       — 空闲占位（上电时序在 main）
+PowerTask         — bsp_power_rails（200 ms：热 + 过流/短路 + 多电源/风扇）
+BmsTask           — BQ76942 采样 + Safety A/B/C + 均衡/充电/SOC/SOH（500 ms）
 ```
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| BQ 驱动 | `User_APP/src/bq76942.c` | 温度、6 节电压、电流、FET、均衡掩码 |
-| 热管理 | `User_APP/src/thermal_manager.c` | TS1/TS2 NTC、风扇、FET 关断 |
+| BQ 驱动 | `User_APP/src/bq76942.c` | 温度、6 节电压、电流、FET、均衡、Safety A/B/C |
+| 电源保护 | `User_APP/src/bsp_power_rails.c` | 24/19/12/6.5/5V、风扇、热/OC-SC 统一策略 |
 | 被动均衡 | `User_APP/src/cell_balance_manager.c` | 充电末期均衡策略与状态 |
-| 充电路径 | `User_APP/src/charge_path.c` | CFETOFF/DFETOFF 仲裁（热管理 OR 压差停充） |
+| 充电路径 | `User_APP/src/charge_path.c` | CFETOFF/DFETOFF 仲裁（热 OR 过流 OR 压差停充 OR 充电管理） |
+
+### 多电源与统一保护（bsp_power_rails）
+
+对外唯一状态：`pwr_rails_status_t`（`BSP_PowerRails_GetStatus()`）。
+
+| 来源 | 动作摘要 |
+|------|----------|
+| 热 NORMAL/WARN/LIMIT/FAULT | 风扇 PWM；高温 LIMIT 关 19V；FAULT 全关 + 禁充放 |
+| BQ SCD / OCD | FAULT：全关电源轨 + 禁充放（锁存） |
+| BQ OCC | FAULT：禁充，输出轨保持 |
+| 软过流（CC2） | WARN 关 19V；FAULT 全关（锁存） |
+
+BmsTask 读 Safety Status A/B/C 原始字节后调用 `BSP_PowerRails_UpdateBqSafety()` 缓存到状态（`status_a/b/c` + 解析 `scd/ocd/occ/bq_any`）。
 
 ## 被动均衡（cell_balance_manager）
 
@@ -94,7 +107,7 @@ BmsTask           — BQ76942 采样 + cell_balance_manager（500 ms）
   → Δ ≤ 15 mV：均衡完成
 ```
 
-CFETOFF 由 `charge_path` 仲裁：`thermal.charge_inhibit OR imbalance_charge_inhibit`。
+CFETOFF 由 `charge_path` 仲裁：`热/过流禁止 OR imbalance_charge_inhibit OR charge_manager`。
 
 ### 压差与开启均衡条件（有 SOC / 无 SOC）
 
@@ -260,9 +273,10 @@ User_APP/
     bms_can_tx.h
     bms_can_ext_tx.h
     bq76942.h
+    bsp_power_rails.h
     cell_balance_manager.h
     charge_path.h
-    thermal_manager.h
+    charge_manager.h
     app_freertos.h
   src/
     bms_can_tx.c
@@ -270,8 +284,9 @@ User_APP/
     bms_data_snapshot.c
     bms_ext_snapshot.c
     bq76942.c
+    bsp_power_rails.c
     cell_balance_manager.c
     charge_path.c
-    thermal_manager.c
+    charge_manager.c
     app_freertos.c
 ```

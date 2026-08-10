@@ -447,7 +447,7 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
     return false;
   }
 
-  /* 24V bypass: thermal_manager / boot sequence owns GPIO. */
+  /* 24V bypass GPIO owned by bsp_power_rails. */
   /* Release host DFETOFF for pack discharge; CFETOFF owned by charge_path. */
   HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_RESET);
 
@@ -545,55 +545,45 @@ bool BQ76942_ReadBatteryStatus(I2C_HandleTypeDef *hi2c, uint16_t *status)
 
   return BQ76942_ReadU16(hi2c, BQ76942_CMD_BATTERY_STATUS, status);
 }
-/*读取安全状态*/
-bool BQ76942_ReadSafetyStatusEx(I2C_HandleTypeDef *hi2c, bq76942_safety_t *out)
+bool BQ76942_ReadSafetyStatusEx(I2C_HandleTypeDef *hi2c,
+                                uint8_t *status_a, uint8_t *status_b,
+                                uint8_t *status_c)
 {
-  uint8_t sa;
-  uint8_t sb;
-  uint8_t sc;
-
-  if ((hi2c == NULL) || (out == NULL))
+  if ((hi2c == NULL) || (status_a == NULL) || (status_b == NULL) ||
+      (status_c == NULL))
   {
     return false;
   }
 
-  out->valid = false;
-
   if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_CMD_SAFETY_STATUS_A,
-                       I2C_MEMADD_SIZE_8BIT, &sa, 1U,
+                       I2C_MEMADD_SIZE_8BIT, status_a, 1U,
                        BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
   {
     return false;
   }
 
   if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_CMD_SAFETY_STATUS_B,
-                       I2C_MEMADD_SIZE_8BIT, &sb, 1U,
+                       I2C_MEMADD_SIZE_8BIT, status_b, 1U,
                        BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
   {
     return false;
   }
 
   if (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_CMD_SAFETY_STATUS_C,
-                       I2C_MEMADD_SIZE_8BIT, &sc, 1U,
+                       I2C_MEMADD_SIZE_8BIT, status_c, 1U,
                        BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
   {
     return false;
   }
 
-  out->status_a = sa;
-  out->status_b = sb;
-  out->status_c = sc;
-  out->scd = ((sa & BQ76942_SA_SCD) != 0U);
-  out->ocd = ((sa & (BQ76942_SA_OCD1 | BQ76942_SA_OCD2)) != 0U);
-  out->occ = ((sa & BQ76942_SA_OCC) != 0U);
-  out->any = ((sa != 0U) || (sb != 0U) || (sc != 0U));
-  out->valid = true;
   return true;
 }
 
 bool BQ76942_ReadSafetyStatus(I2C_HandleTypeDef *hi2c, bool *protect_active)
 {
-  bq76942_safety_t safety;
+  uint8_t sa = 0U;
+  uint8_t sb = 0U;
+  uint8_t sc = 0U;
 
   if (protect_active == NULL)
   {
@@ -601,12 +591,12 @@ bool BQ76942_ReadSafetyStatus(I2C_HandleTypeDef *hi2c, bool *protect_active)
   }
 
   *protect_active = false;
-  if (!BQ76942_ReadSafetyStatusEx(hi2c, &safety))
+  if (!BQ76942_ReadSafetyStatusEx(hi2c, &sa, &sb, &sc))
   {
     return false;
   }
 
-  *protect_active = safety.any;
+  *protect_active = ((sa != 0U) || (sb != 0U) || (sc != 0U));
   return true;
 }
 

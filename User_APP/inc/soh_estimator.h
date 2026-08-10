@@ -19,8 +19,8 @@
 #include <stdbool.h>
 
 #include "bq76942.h"
+#include "bsp_power_rails.h"
 #include "charge_manager.h"
-#include "thermal_manager.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,7 +64,7 @@ typedef struct
 {
   const bq76942_meas_t *meas;
   const bq76942_temp_t *temp;
-  const thermal_status_t *thermal;
+  const pwr_rails_status_t *protect;
   charge_state_t charge_state;
   bool bq_protect;
   uint32_t comm_fail_count;

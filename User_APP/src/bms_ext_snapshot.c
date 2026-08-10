@@ -6,10 +6,9 @@
 
 #include "app_freertos.h"
 #include "bq76942.h"
+#include "bsp_power_rails.h"
 #include "cell_balance_manager.h"
 #include "charge_manager.h"
-#include "bsp_power_rails.h"
-#include "thermal_manager.h"
 
 #include <string.h>
 
@@ -28,11 +27,9 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
 {
   const bq76942_meas_t *meas;
   const bq76942_temp_t *temp;
-  const thermal_status_t *thermal;
-  const protect_status_t *protect;
+  const pwr_rails_status_t *pwr;
   const charge_status_t *charge;
   const balance_status_t *balance;
-  const bq76942_safety_t *safety;
   uint32_t alarm = 0U;
   uint8_t severity = BMS_EXT_SEVERITY_NONE;
   uint8_t source = 0U;
@@ -44,11 +41,9 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
 
   meas = Bms_GetBqMeasurements();
   temp = Bms_GetBqTemperatures();
-  thermal = Thermal_GetStatus();
-  protect = Protect_GetStatus();
+  pwr = BSP_PowerRails_GetStatus();
   charge = ChargeManager_GetStatus();
   balance = Balance_GetStatus();
-  safety = Bms_GetBqSafety();
 
   (void)memset(out, 0, sizeof(*out));
 
@@ -81,23 +76,45 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
     out->ts2_c_x10 = (int16_t)-4000;
   }
 
-  if (thermal != NULL) {
-    source = (uint8_t)(source | BMS_EXT_SOURCE_THERMAL);
+  if (pwr != NULL) {
+    source = (uint8_t)(source | BMS_EXT_SOURCE_THERMAL | BMS_EXT_SOURCE_PROTECT);
 
-    if (thermal->state >= THERMAL_STATE_LIMIT) {
-      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OVERTEMP);
+    if ((pwr->state >= PWR_STATE_LIMIT) &&
+        ((pwr->reason == PWR_REASON_HOT) ||
+         (pwr->reason == PWR_REASON_SENSOR) ||
+         (pwr->reason == PWR_REASON_COLD_CHARGE))) {
+      if (pwr->reason == PWR_REASON_COLD_CHARGE) {
+        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COLD_CHARGE);
+      } else {
+        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OVERTEMP);
+      }
     }
-    if (thermal->reason == THERMAL_REASON_COLD_CHARGE) {
-      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COLD_CHARGE);
+
+    if (pwr->reason == PWR_REASON_SCD) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_SHORT_CIRCUIT |
+                         BMS_EXT_ALARM_OCP | BMS_EXT_ALARM_BQ_PROTECT);
+    } else if ((pwr->reason == PWR_REASON_OCD) ||
+               (pwr->reason == PWR_REASON_OCC) ||
+               (pwr->reason == PWR_REASON_SOFT_OCD) ||
+               (pwr->state == PWR_STATE_WARN &&
+                pwr->reason == PWR_REASON_SOFT_OCD)) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OCP);
+      if (pwr->reason != PWR_REASON_SOFT_OCD) {
+        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BQ_PROTECT);
+      }
     }
-    if (thermal->charge_inhibit) {
+
+    if (pwr->charge_inhibit) {
       alarm = (uint32_t)(alarm | BMS_EXT_ALARM_CHG_INHIBIT);
     }
-    if (thermal->discharge_inhibit) {
+    if (pwr->discharge_inhibit) {
       alarm = (uint32_t)(alarm | BMS_EXT_ALARM_DSG_INHIBIT);
     }
-    if (!thermal->sensor_ok) {
+    if (!pwr->sensor_ok) {
       alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COMM_FAIL);
+    }
+    if (pwr->bq_valid && pwr->bq_any) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BQ_PROTECT);
     }
   }
 
@@ -137,37 +154,6 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
       Bms_GetBqTempFailCount() >= BMS_EXT_COMM_FAIL_THRESHOLD ||
       Bms_GetBqCommFailCount() >= BMS_EXT_COMM_FAIL_THRESHOLD) {
     alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COMM_FAIL);
-  }
-
-  if (protect != NULL) {
-    source = (uint8_t)(source | BMS_EXT_SOURCE_PROTECT);
-
-    if (protect->state == PROTECT_STATE_FAULT) {
-      if (protect->reason == PROTECT_REASON_SCD) {
-        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_SHORT_CIRCUIT |
-                           BMS_EXT_ALARM_OCP | BMS_EXT_ALARM_BQ_PROTECT);
-      } else if ((protect->reason == PROTECT_REASON_OCD) ||
-                 (protect->reason == PROTECT_REASON_SOFT_OCD) ||
-                 (protect->reason == PROTECT_REASON_OCC)) {
-        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OCP);
-        if (protect->reason != PROTECT_REASON_SOFT_OCD) {
-          alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BQ_PROTECT);
-        }
-      }
-    } else if (protect->state == PROTECT_STATE_WARN) {
-      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OCP);
-    }
-
-    if (protect->charge_inhibit) {
-      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_CHG_INHIBIT);
-    }
-    if (protect->discharge_inhibit) {
-      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_DSG_INHIBIT);
-    }
-  }
-
-  if ((safety != NULL) && safety->valid && safety->any) {
-    alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BQ_PROTECT);
   }
 
   if (alarm != 0U) {

@@ -1,31 +1,62 @@
 /**
  ******************************************************************************
  * @file    bsp_power_rails.c
- * @brief   Multi-rail GPIO control + OC/SC protect policy.
+ * @brief   Multi-rail GPIO + unified thermal / BQ OC-SC / soft OCD protect.
  ******************************************************************************
  */
 #include "bsp_power_rails.h"
+#include "bsp_fan.h"
+#include "bq76942.h"
 #include "charge_path.h"
 #include "app_freertos.h"
 #include "main.h"
 
-/* Software discharge OC (mA, negative current = discharge). Tune on hardware. */
-#define PROTECT_SOFT_OCD_WARN_MA          12000  /* |Id| ≥ 12 A → drop 19V */
-#define PROTECT_SOFT_OCD_FAULT_MA         20000  /* |Id| ≥ 20 A → all rails off */
-#define PROTECT_SOFT_OCD_WARN_DEBOUNCE       3U  /* ~600 ms @ 200 ms */
-#define PROTECT_SOFT_OCD_FAULT_DEBOUNCE      2U  /* ~400 ms */
-#define PROTECT_SOFT_CLEAR_MA             2000   /* |Id| must fall below */
+/* Thermal thresholds (°C * 10). */
+#define THERMAL_WARN_ENTER_CX10           400
+#define THERMAL_WARN_EXIT_CX10            370
+#define THERMAL_LIMIT_ENTER_CX10          500
+#define THERMAL_LIMIT_EXIT_CX10           470
+#define THERMAL_FAULT_ENTER_CX10          550
+#define THERMAL_FAULT_EXIT_CX10           500
+#define THERMAL_COLD_ENTER_CX10             0
+#define THERMAL_COLD_EXIT_CX10             30
 
-#define PROTECT_RAILS_WARN \
+#define THERMAL_FAN_DUTY_NORMAL             0U
+#define THERMAL_FAN_DUTY_WARN              45U
+#define THERMAL_FAN_DUTY_LIMIT             80U
+#define THERMAL_FAN_DUTY_FAULT            100U
+#define THERMAL_SENSOR_FAIL_THRESHOLD       6U
+
+/* Soft discharge OC (mA). */
+#define PROTECT_SOFT_OCD_WARN_MA          12000
+#define PROTECT_SOFT_OCD_FAULT_MA         20000
+#define PROTECT_SOFT_OCD_WARN_DEBOUNCE       3U
+#define PROTECT_SOFT_OCD_FAULT_DEBOUNCE      2U
+#define PROTECT_SOFT_CLEAR_MA             2000
+
+#define PWR_RAILS_DROP_19V \
   ((uint8_t)(PWR_MASK_24V | PWR_MASK_12V | PWR_MASK_6V5 | PWR_MASK_5V))
 
-static pwr_rails_status_t s_rails;
-static protect_status_t s_protect;
+typedef enum
+{
+  PWR_REQ_THERMAL = 0,
+  PWR_REQ_PROTECT,
+  PWR_REQ_COUNT
+} pwr_req_source_t;
+
+static pwr_rails_status_t s_status;
+static uint8_t s_request_mask[PWR_REQ_COUNT];
+static bool s_thermal_latched;
+static bool s_current_latched;
+static pwr_state_t s_thermal_state;
+static pwr_reason_t s_thermal_reason;
+static pwr_state_t s_current_state;
+static pwr_reason_t s_current_reason;
 static uint8_t s_soft_warn_count;
 static uint8_t s_soft_fault_count;
 
 /* -------------------------------------------------------------------------- */
-/* GPIO / arbitration                                                         */
+/* GPIO                                                                       */
 /* -------------------------------------------------------------------------- */
 
 static void PowerRails_WriteGpio(pwr_rail_id_t rail, bool on)
@@ -47,7 +78,6 @@ static void PowerRails_WriteGpio(pwr_rail_id_t rail, bool on)
       HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, level);
       break;
     case PWR_RAIL_5V:
-      break;
     default:
       break;
   }
@@ -65,218 +95,208 @@ static void PowerRails_DriveMask(uint8_t enable_mask)
     if (i == (uint8_t)PWR_RAIL_5V)
     {
       on = on_6v5 && ((enable_mask & PWR_MASK_5V) != 0U);
-      s_rails.rail_on[i] = on;
+      s_status.rail_on[i] = on;
       continue;
     }
 
     on = ((enable_mask & (1u << i)) != 0U);
-    s_rails.rail_on[i] = on;
+    s_status.rail_on[i] = on;
     PowerRails_WriteGpio((pwr_rail_id_t)i, on);
   }
 
-  s_rails.enabled_mask = 0U;
+  s_status.enabled_mask = 0U;
   for (i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
   {
-    if (s_rails.rail_on[i])
+    if (s_status.rail_on[i])
     {
-      s_rails.enabled_mask =
-          (uint8_t)(s_rails.enabled_mask | (1u << i));
+      s_status.enabled_mask =
+          (uint8_t)(s_status.enabled_mask | (1u << i));
     }
   }
 }
 
-void BSP_PowerRails_Init(void)
+static void PowerRails_SetRequest(pwr_req_source_t source, uint8_t enable_mask)
 {
-  uint8_t i;
-
-  for (i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
+  if ((uint8_t)source < (uint8_t)PWR_REQ_COUNT)
   {
-    s_rails.rail_on[i] = false;
-  }
-  s_rails.enabled_mask = 0U;
-
-  for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
-  {
-    s_rails.request_mask[i] = PWR_MASK_ALL;
+    s_request_mask[source] = (uint8_t)(enable_mask & PWR_MASK_ALL);
   }
 }
 
-void BSP_PowerRails_BootSequence(void)
-{
-  uint8_t i;
-
-  PowerRails_DriveMask(0U);
-
-  PowerRails_WriteGpio(PWR_RAIL_24V, true);
-  s_rails.rail_on[PWR_RAIL_24V] = true;
-  HAL_Delay(300);
-
-  PowerRails_WriteGpio(PWR_RAIL_19V, true);
-  s_rails.rail_on[PWR_RAIL_19V] = true;
-  HAL_Delay(300);
-
-  PowerRails_WriteGpio(PWR_RAIL_6V5, true);
-  s_rails.rail_on[PWR_RAIL_6V5] = true;
-  s_rails.rail_on[PWR_RAIL_5V] = true;
-  HAL_Delay(200);
-
-  PowerRails_WriteGpio(PWR_RAIL_12V, true);
-  s_rails.rail_on[PWR_RAIL_12V] = true;
-
-  s_rails.enabled_mask = PWR_MASK_ALL;
-  for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
-  {
-    s_rails.request_mask[i] = PWR_MASK_ALL;
-  }
-}
-
-void BSP_PowerRails_SetRequest(pwr_req_source_t source, uint8_t enable_mask)
-{
-  if ((uint8_t)source >= (uint8_t)PWR_REQ_COUNT)
-  {
-    return;
-  }
-
-  s_rails.request_mask[source] = (uint8_t)(enable_mask & PWR_MASK_ALL);
-}
-
-void BSP_PowerRails_Apply(void)
+static void PowerRails_ApplyRequests(void)
 {
   uint8_t mask = PWR_MASK_ALL;
   uint8_t i;
 
   for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
   {
-    mask = (uint8_t)(mask & s_rails.request_mask[i]);
+    mask = (uint8_t)(mask & s_request_mask[i]);
   }
 
+  s_status.power_rails_mask = mask;
   PowerRails_DriveMask(mask);
 }
 
-void BSP_PowerRails_ApplyMask(uint8_t enable_mask)
-{
-  BSP_PowerRails_SetRequest(PWR_REQ_THERMAL, enable_mask);
-  BSP_PowerRails_Apply();
-}
-
-const pwr_rails_status_t *BSP_PowerRails_GetStatus(void)
-{
-  return &s_rails;
-}
-
 /* -------------------------------------------------------------------------- */
-/* Overcurrent / short-circuit protect                                        */
+/* Thermal evaluation                                                         */
 /* -------------------------------------------------------------------------- */
 
-static void Protect_ApplyActuators(void)
+static pwr_state_t PowerRails_EvalHotState(int16_t tmax_c_x10, pwr_state_t prev)
 {
-  uint8_t pwr_mask = PWR_MASK_ALL;
-  bool chg_off = false;
-  bool dsg_off = false;
-
-  switch (s_protect.state)
+  if (tmax_c_x10 >= THERMAL_FAULT_ENTER_CX10)
   {
-    case PROTECT_STATE_WARN:
-      pwr_mask = PROTECT_RAILS_WARN;
-      break;
-
-    case PROTECT_STATE_FAULT:
-      switch (s_protect.reason)
-      {
-        case PROTECT_REASON_OCC:
-          chg_off = true;
-          pwr_mask = PWR_MASK_ALL;
-          break;
-        case PROTECT_REASON_SCD:
-        case PROTECT_REASON_OCD:
-        case PROTECT_REASON_SOFT_OCD:
-        default:
-          pwr_mask = 0U;
-          chg_off = true;
-          dsg_off = true;
-          break;
-      }
-      break;
-
-    case PROTECT_STATE_NORMAL:
-    default:
-      break;
+    return PWR_STATE_FAULT;
   }
 
-  s_protect.power_rails_mask = pwr_mask;
-  s_protect.charge_inhibit = chg_off;
-  s_protect.discharge_inhibit = dsg_off;
+  if (prev == PWR_STATE_FAULT)
+  {
+    return PWR_STATE_FAULT;
+  }
 
-  BSP_PowerRails_SetRequest(PWR_REQ_PROTECT, pwr_mask);
-  BSP_PowerRails_Apply();
-  ChargePath_SetProtectInhibit(chg_off, dsg_off);
-  ChargePath_Apply();
+  if (tmax_c_x10 >= THERMAL_LIMIT_ENTER_CX10)
+  {
+    return PWR_STATE_LIMIT;
+  }
+
+  if ((prev == PWR_STATE_LIMIT) && (tmax_c_x10 > THERMAL_LIMIT_EXIT_CX10))
+  {
+    return PWR_STATE_LIMIT;
+  }
+
+  if (tmax_c_x10 >= THERMAL_WARN_ENTER_CX10)
+  {
+    return PWR_STATE_WARN;
+  }
+
+  if ((prev == PWR_STATE_WARN) && (tmax_c_x10 > THERMAL_WARN_EXIT_CX10))
+  {
+    return PWR_STATE_WARN;
+  }
+
+  return PWR_STATE_NORMAL;
 }
 
-void Protect_Init(void)
+static void PowerRails_EvalThermal(void)
 {
-  s_protect.state = PROTECT_STATE_NORMAL;
-  s_protect.reason = PROTECT_REASON_NONE;
-  s_protect.power_rails_mask = PWR_MASK_ALL;
-  s_protect.charge_inhibit = false;
-  s_protect.discharge_inhibit = false;
-  s_protect.latched = false;
-  s_protect.safety_ok = false;
-  s_protect.status_a = 0U;
-  s_protect.pack_current_ma = 0;
-  s_soft_warn_count = 0U;
-  s_soft_fault_count = 0U;
+  const bq76942_temp_t *temp = Bms_GetBqTemperatures();
+  const uint32_t fail_count = Bms_GetBqTempFailCount();
+  pwr_state_t next;
 
-  BSP_PowerRails_SetRequest(PWR_REQ_PROTECT, PWR_MASK_ALL);
-  ChargePath_SetProtectInhibit(false, false);
-  Protect_ApplyActuators();
+  if (temp == NULL)
+  {
+    return;
+  }
+
+  if (fail_count >= THERMAL_SENSOR_FAIL_THRESHOLD)
+  {
+    s_status.sensor_ok = false;
+    s_thermal_state = PWR_STATE_FAULT;
+    s_thermal_reason = PWR_REASON_SENSOR;
+    s_thermal_latched = true;
+    return;
+  }
+
+  if (!temp->valid)
+  {
+    return;
+  }
+
+  s_status.sensor_ok = true;
+  s_status.die_c_x10 = temp->int_temp_c_x10;
+  s_status.tmax_c_x10 = (temp->ts1_temp_c_x10 > temp->ts2_temp_c_x10) ?
+                        temp->ts1_temp_c_x10 : temp->ts2_temp_c_x10;
+  s_status.tmin_c_x10 = (temp->ts1_temp_c_x10 < temp->ts2_temp_c_x10) ?
+                        temp->ts1_temp_c_x10 : temp->ts2_temp_c_x10;
+
+  if (s_thermal_latched && (s_thermal_reason == PWR_REASON_SENSOR))
+  {
+    s_thermal_latched = false;
+    s_thermal_state = PWR_STATE_NORMAL;
+    s_thermal_reason = PWR_REASON_NONE;
+  }
+
+  next = PowerRails_EvalHotState(s_status.tmax_c_x10, s_thermal_state);
+
+  if (next == PWR_STATE_FAULT)
+  {
+    s_thermal_latched = true;
+    s_thermal_reason = PWR_REASON_HOT;
+  }
+  else if (s_status.tmin_c_x10 < THERMAL_COLD_ENTER_CX10)
+  {
+    if (next < PWR_STATE_LIMIT)
+    {
+      next = PWR_STATE_LIMIT;
+    }
+    s_thermal_reason = PWR_REASON_COLD_CHARGE;
+  }
+  else if ((s_thermal_reason == PWR_REASON_COLD_CHARGE) &&
+           (s_status.tmin_c_x10 < THERMAL_COLD_EXIT_CX10))
+  {
+    if (next < PWR_STATE_LIMIT)
+    {
+      next = PWR_STATE_LIMIT;
+    }
+    s_thermal_reason = PWR_REASON_COLD_CHARGE;
+  }
+  else if (next == PWR_STATE_NORMAL)
+  {
+    s_thermal_reason = PWR_REASON_NONE;
+  }
+  else
+  {
+    s_thermal_reason = PWR_REASON_HOT;
+  }
+
+  if (s_thermal_latched && (s_thermal_reason == PWR_REASON_HOT))
+  {
+    next = PWR_STATE_FAULT;
+  }
+
+  s_thermal_state = next;
 }
 
-void Protect_Process(void)
+/* -------------------------------------------------------------------------- */
+/* Current / BQ OC-SC evaluation                                              */
+/* -------------------------------------------------------------------------- */
+
+static void PowerRails_EvalCurrent(void)
 {
-  const bq76942_safety_t *safety = Bms_GetBqSafety();
   const bq76942_meas_t *meas = Bms_GetBqMeasurements();
   int16_t i_ma = 0;
   int16_t i_abs;
-  protect_state_t next = PROTECT_STATE_NORMAL;
-  protect_reason_t reason = PROTECT_REASON_NONE;
+  pwr_state_t next = PWR_STATE_NORMAL;
+  pwr_reason_t reason = PWR_REASON_NONE;
 
   if ((meas != NULL) && meas->valid)
   {
     i_ma = meas->current_ma;
   }
-  s_protect.pack_current_ma = i_ma;
+  s_status.pack_current_ma = i_ma;
   i_abs = (i_ma < 0) ? (int16_t)(-i_ma) : i_ma;
 
-  if ((safety != NULL) && safety->valid)
+  if (s_status.bq_valid)
   {
-    s_protect.safety_ok = true;
-    s_protect.status_a = safety->status_a;
-
-    if (safety->scd)
+    if (s_status.scd)
     {
-      next = PROTECT_STATE_FAULT;
-      reason = PROTECT_REASON_SCD;
-      s_protect.latched = true;
+      next = PWR_STATE_FAULT;
+      reason = PWR_REASON_SCD;
+      s_current_latched = true;
     }
-    else if (safety->ocd)
+    else if (s_status.ocd)
     {
-      next = PROTECT_STATE_FAULT;
-      reason = PROTECT_REASON_OCD;
-      s_protect.latched = true;
+      next = PWR_STATE_FAULT;
+      reason = PWR_REASON_OCD;
+      s_current_latched = true;
     }
-    else if (safety->occ)
+    else if (s_status.occ)
     {
-      next = PROTECT_STATE_FAULT;
-      reason = PROTECT_REASON_OCC;
+      next = PWR_STATE_FAULT;
+      reason = PWR_REASON_OCC;
     }
   }
-  else
-  {
-    s_protect.safety_ok = false;
-  }
 
-  if ((next != PROTECT_STATE_FAULT) || (reason == PROTECT_REASON_OCC))
+  if ((next != PWR_STATE_FAULT) || (reason == PWR_REASON_OCC))
   {
     if ((meas != NULL) && meas->valid && (i_ma < 0))
     {
@@ -306,15 +326,15 @@ void Protect_Process(void)
 
       if (s_soft_fault_count >= PROTECT_SOFT_OCD_FAULT_DEBOUNCE)
       {
-        next = PROTECT_STATE_FAULT;
-        reason = PROTECT_REASON_SOFT_OCD;
-        s_protect.latched = true;
+        next = PWR_STATE_FAULT;
+        reason = PWR_REASON_SOFT_OCD;
+        s_current_latched = true;
       }
       else if ((s_soft_warn_count >= PROTECT_SOFT_OCD_WARN_DEBOUNCE) &&
-               (next < PROTECT_STATE_WARN))
+               (next < PWR_STATE_WARN))
       {
-        next = PROTECT_STATE_WARN;
-        reason = PROTECT_REASON_SOFT_OCD;
+        next = PWR_STATE_WARN;
+        reason = PWR_REASON_SOFT_OCD;
       }
     }
     else
@@ -324,75 +344,345 @@ void Protect_Process(void)
     }
   }
 
-  if (s_protect.latched &&
-      ((s_protect.reason == PROTECT_REASON_SCD) ||
-       (s_protect.reason == PROTECT_REASON_OCD) ||
-       (s_protect.reason == PROTECT_REASON_SOFT_OCD)))
+  if (s_current_latched &&
+      ((s_current_reason == PWR_REASON_SCD) ||
+       (s_current_reason == PWR_REASON_OCD) ||
+       (s_current_reason == PWR_REASON_SOFT_OCD)))
   {
-    next = PROTECT_STATE_FAULT;
-    reason = s_protect.reason;
+    next = PWR_STATE_FAULT;
+    reason = s_current_reason;
   }
 
-  if ((next == PROTECT_STATE_NORMAL) &&
-      (s_protect.reason == PROTECT_REASON_OCC) &&
-      (!s_protect.latched))
+  if ((next == PWR_STATE_NORMAL) &&
+      (s_current_reason == PWR_REASON_OCC) &&
+      (!s_current_latched))
   {
-    reason = PROTECT_REASON_NONE;
+    reason = PWR_REASON_NONE;
   }
 
-  s_protect.state = next;
-  s_protect.reason = reason;
-  Protect_ApplyActuators();
+  s_current_state = next;
+  s_current_reason = reason;
 }
 
-const protect_status_t *Protect_GetStatus(void)
+/* -------------------------------------------------------------------------- */
+/* Combine + actuate                                                          */
+/* -------------------------------------------------------------------------- */
+
+static void PowerRails_ApplyActuators(void)
 {
-  return &s_protect;
+  uint8_t thermal_mask = PWR_MASK_ALL;
+  uint8_t protect_mask = PWR_MASK_ALL;
+  uint8_t duty = THERMAL_FAN_DUTY_NORMAL;
+  bool thermal_chg = false;
+  bool thermal_dsg = false;
+  bool protect_chg = false;
+  bool protect_dsg = false;
+
+  /* Thermal rail / FET / fan */
+  switch (s_thermal_state)
+  {
+    case PWR_STATE_WARN:
+      duty = THERMAL_FAN_DUTY_WARN;
+      break;
+    case PWR_STATE_LIMIT:
+      if (s_thermal_reason == PWR_REASON_COLD_CHARGE)
+      {
+        duty = THERMAL_FAN_DUTY_NORMAL;
+        thermal_mask = PWR_MASK_ALL;
+      }
+      else
+      {
+        duty = THERMAL_FAN_DUTY_LIMIT;
+        thermal_mask = PWR_RAILS_DROP_19V;
+      }
+      thermal_chg = true;
+      break;
+    case PWR_STATE_FAULT:
+      duty = THERMAL_FAN_DUTY_FAULT;
+      thermal_mask = 0U;
+      thermal_chg = true;
+      thermal_dsg = true;
+      break;
+    case PWR_STATE_NORMAL:
+    default:
+      break;
+  }
+
+  /* Current protect rail / FET */
+  switch (s_current_state)
+  {
+    case PWR_STATE_WARN:
+      protect_mask = PWR_RAILS_DROP_19V;
+      break;
+    case PWR_STATE_FAULT:
+      if (s_current_reason == PWR_REASON_OCC)
+      {
+        protect_chg = true;
+        protect_mask = PWR_MASK_ALL;
+      }
+      else
+      {
+        protect_mask = 0U;
+        protect_chg = true;
+        protect_dsg = true;
+      }
+      break;
+    default:
+      break;
+  }
+
+  /* Combined public state: FAULT > LIMIT > WARN > NORMAL */
+  if ((s_thermal_state == PWR_STATE_FAULT) ||
+      (s_current_state == PWR_STATE_FAULT))
+  {
+    s_status.state = PWR_STATE_FAULT;
+    if (s_current_state == PWR_STATE_FAULT)
+    {
+      s_status.reason = s_current_reason;
+    }
+    else
+    {
+      s_status.reason = s_thermal_reason;
+    }
+  }
+  else if (s_thermal_state == PWR_STATE_LIMIT)
+  {
+    s_status.state = PWR_STATE_LIMIT;
+    s_status.reason = s_thermal_reason;
+  }
+  else if ((s_thermal_state == PWR_STATE_WARN) ||
+           (s_current_state == PWR_STATE_WARN))
+  {
+    s_status.state = PWR_STATE_WARN;
+    s_status.reason = (s_current_state == PWR_STATE_WARN) ?
+                      s_current_reason : s_thermal_reason;
+  }
+  else
+  {
+    s_status.state = PWR_STATE_NORMAL;
+    s_status.reason = PWR_REASON_NONE;
+  }
+
+  s_status.latched = s_thermal_latched || s_current_latched;
+  s_status.fan_duty_percent = duty;
+  s_status.charge_inhibit = thermal_chg || protect_chg;
+  s_status.discharge_inhibit = thermal_dsg || protect_dsg;
+
+  BSP_Fan_SetDutyPercent(duty);
+  PowerRails_SetRequest(PWR_REQ_THERMAL, thermal_mask);
+  PowerRails_SetRequest(PWR_REQ_PROTECT, protect_mask);
+  PowerRails_ApplyRequests();
+
+  ChargePath_SetThermalInhibit(thermal_chg, thermal_dsg);
+  ChargePath_SetProtectInhibit(protect_chg, protect_dsg);
+  ChargePath_Apply();
 }
 
-protect_state_t Protect_GetState(void)
+/* -------------------------------------------------------------------------- */
+/* Public API                                                                 */
+/* -------------------------------------------------------------------------- */
+
+void BSP_PowerRails_Init(void)
 {
-  return s_protect.state;
-}
+  uint8_t i;
 
-bool Protect_ClearFault(void)
-{
-  const bq76942_safety_t *safety = Bms_GetBqSafety();
-  const bq76942_meas_t *meas = Bms_GetBqMeasurements();
-  int16_t i_abs;
-
-  if (s_protect.state != PROTECT_STATE_FAULT)
+  for (i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
   {
-    return false;
+    s_status.rail_on[i] = false;
   }
 
-  if ((safety == NULL) || (!safety->valid))
+  s_status.enabled_mask = 0U;
+  s_status.power_rails_mask = PWR_MASK_ALL;
+  s_status.fan_duty_percent = 0U;
+  s_status.charge_inhibit = false;
+  s_status.discharge_inhibit = false;
+  s_status.state = PWR_STATE_NORMAL;
+  s_status.reason = PWR_REASON_NONE;
+  s_status.latched = false;
+  s_status.tmax_c_x10 = 0;
+  s_status.tmin_c_x10 = 0;
+  s_status.die_c_x10 = 0;
+  s_status.sensor_ok = false;
+  s_status.status_a = 0U;
+  s_status.status_b = 0U;
+  s_status.status_c = 0U;
+  s_status.scd = false;
+  s_status.ocd = false;
+  s_status.occ = false;
+  s_status.bq_any = false;
+  s_status.bq_valid = false;
+  s_status.pack_current_ma = 0;
+
+  for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
   {
-    return false;
+    s_request_mask[i] = PWR_MASK_ALL;
   }
 
-  if (safety->scd || safety->ocd || safety->occ)
-  {
-    return false;
-  }
-
-  if ((meas == NULL) || (!meas->valid))
-  {
-    return false;
-  }
-
-  i_abs = (meas->current_ma < 0) ?
-          (int16_t)(-meas->current_ma) : meas->current_ma;
-  if (i_abs > PROTECT_SOFT_CLEAR_MA)
-  {
-    return false;
-  }
-
-  s_protect.latched = false;
-  s_protect.state = PROTECT_STATE_NORMAL;
-  s_protect.reason = PROTECT_REASON_NONE;
+  s_thermal_latched = false;
+  s_current_latched = false;
+  s_thermal_state = PWR_STATE_NORMAL;
+  s_thermal_reason = PWR_REASON_NONE;
+  s_current_state = PWR_STATE_NORMAL;
+  s_current_reason = PWR_REASON_NONE;
   s_soft_warn_count = 0U;
   s_soft_fault_count = 0U;
-  Protect_ApplyActuators();
-  return true;
+
+  BSP_Fan_Init();
+  ChargePath_SetThermalInhibit(false, false);
+  ChargePath_SetProtectInhibit(false, false);
+  PowerRails_ApplyActuators();
+}
+
+void BSP_PowerRails_BootSequence(void)
+{
+  uint8_t i;
+
+  PowerRails_DriveMask(0U);
+
+  PowerRails_WriteGpio(PWR_RAIL_24V, true);
+  s_status.rail_on[PWR_RAIL_24V] = true;
+  HAL_Delay(300);
+
+  PowerRails_WriteGpio(PWR_RAIL_19V, true);
+  s_status.rail_on[PWR_RAIL_19V] = true;
+  HAL_Delay(300);
+
+  PowerRails_WriteGpio(PWR_RAIL_6V5, true);
+  s_status.rail_on[PWR_RAIL_6V5] = true;
+  s_status.rail_on[PWR_RAIL_5V] = true;
+  HAL_Delay(200);
+
+  PowerRails_WriteGpio(PWR_RAIL_12V, true);
+  s_status.rail_on[PWR_RAIL_12V] = true;
+
+  s_status.enabled_mask = PWR_MASK_ALL;
+  s_status.power_rails_mask = PWR_MASK_ALL;
+  for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
+  {
+    s_request_mask[i] = PWR_MASK_ALL;
+  }
+}
+
+void BSP_PowerRails_UpdateBqSafety(uint8_t status_a, uint8_t status_b,
+                                   uint8_t status_c, bool valid)
+{
+  s_status.status_a = status_a;
+  s_status.status_b = status_b;
+  s_status.status_c = status_c;
+  s_status.bq_valid = valid;
+
+  if (!valid)
+  {
+    s_status.scd = false;
+    s_status.ocd = false;
+    s_status.occ = false;
+    s_status.bq_any = false;
+    return;
+  }
+
+  s_status.scd = ((status_a & BQ76942_SA_SCD) != 0U);
+  s_status.ocd = ((status_a & (BQ76942_SA_OCD1 | BQ76942_SA_OCD2)) != 0U);
+  s_status.occ = ((status_a & BQ76942_SA_OCC) != 0U);
+  s_status.bq_any = ((status_a != 0U) || (status_b != 0U) || (status_c != 0U));
+}
+
+void BSP_PowerRails_Process(void)
+{
+  PowerRails_EvalThermal();
+  PowerRails_EvalCurrent();
+  PowerRails_ApplyActuators();
+}
+
+const pwr_rails_status_t *BSP_PowerRails_GetStatus(void)
+{
+  return &s_status;
+}
+
+pwr_state_t BSP_PowerRails_GetState(void)
+{
+  return s_status.state;
+}
+
+bool BSP_PowerRails_ClearFault(void)
+{
+  const bq76942_meas_t *meas = Bms_GetBqMeasurements();
+  int16_t i_abs;
+  bool cleared = false;
+
+  if (s_status.state != PWR_STATE_FAULT)
+  {
+    return false;
+  }
+
+  /* Clear current latch if BQ flags and soft current are OK. */
+  if (s_current_latched || (s_current_state == PWR_STATE_FAULT))
+  {
+    if (!s_status.bq_valid)
+    {
+      return false;
+    }
+    if (s_status.scd || s_status.ocd || s_status.occ)
+    {
+      return false;
+    }
+    if ((meas == NULL) || (!meas->valid))
+    {
+      return false;
+    }
+    i_abs = (meas->current_ma < 0) ?
+            (int16_t)(-meas->current_ma) : meas->current_ma;
+    if (i_abs > PROTECT_SOFT_CLEAR_MA)
+    {
+      return false;
+    }
+
+    s_current_latched = false;
+    s_current_state = PWR_STATE_NORMAL;
+    s_current_reason = PWR_REASON_NONE;
+    s_soft_warn_count = 0U;
+    s_soft_fault_count = 0U;
+    cleared = true;
+  }
+
+  /* Clear thermal hot latch when cooled. */
+  if (s_thermal_latched || (s_thermal_state == PWR_STATE_FAULT))
+  {
+    if (!s_status.sensor_ok)
+    {
+      return false;
+    }
+    if (s_status.tmax_c_x10 > THERMAL_FAULT_EXIT_CX10)
+    {
+      return false;
+    }
+    if (s_thermal_reason == PWR_REASON_SENSOR)
+    {
+      return false;
+    }
+
+    s_thermal_latched = false;
+    s_thermal_state = PowerRails_EvalHotState(s_status.tmax_c_x10,
+                                              PWR_STATE_LIMIT);
+    if (s_status.tmin_c_x10 < THERMAL_COLD_ENTER_CX10)
+    {
+      s_thermal_state = PWR_STATE_LIMIT;
+      s_thermal_reason = PWR_REASON_COLD_CHARGE;
+    }
+    else if (s_thermal_state == PWR_STATE_NORMAL)
+    {
+      s_thermal_reason = PWR_REASON_NONE;
+    }
+    else
+    {
+      s_thermal_reason = PWR_REASON_HOT;
+    }
+    cleared = true;
+  }
+
+  if (cleared)
+  {
+    PowerRails_ApplyActuators();
+  }
+
+  return cleared;
 }

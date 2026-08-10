@@ -8,7 +8,7 @@
 #include "bq76942.h"
 #include "soc_estimator.h"
 #include "soh_estimator.h"
-#include "thermal_manager.h"
+#include "bsp_power_rails.h"
 
 static float bms_snapshot_temp_c(const bq76942_temp_t *temp)
 {
@@ -66,7 +66,7 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
 {
   const bq76942_meas_t *meas;
   const bq76942_temp_t *temp;
-  const thermal_status_t *thermal;
+  const pwr_rails_status_t *pwr;
   uint32_t pack_mv;
 
   if (out == NULL) {
@@ -75,7 +75,7 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
 
   meas = Bms_GetBqMeasurements();
   temp = Bms_GetBqTemperatures();
-  thermal = Thermal_GetStatus();
+  pwr = BSP_PowerRails_GetStatus();
 
   out->series_cells = (uint8_t)BQ76942_CELL_COUNT;
   out->present = 1u;
@@ -104,7 +104,7 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
   }
 
   out->temperature_c = bms_snapshot_temp_c(temp);
-  if ((thermal != NULL) && !thermal->sensor_ok && (out->temperature_c < 0.0f)) {
+  if ((pwr != NULL) && !pwr->sensor_ok && (out->temperature_c < 0.0f)) {
     out->temperature_c = -1.0f;
   }
 }

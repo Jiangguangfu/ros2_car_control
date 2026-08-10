@@ -57,7 +57,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/bq76942.c
     User_APP/src/bsp_fan.c
     User_APP/src/bsp_power_rails.c
-    User_APP/src/thermal_manager.c
     User_APP/src/cell_balance_manager.c
     User_APP/src/charge_path.c
     User_APP/src/charge_manager.c

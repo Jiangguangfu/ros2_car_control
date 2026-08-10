@@ -109,9 +109,9 @@ extern "C" {
 
 /* 0x03 Safety Status A — TRM (current / cell voltage faults) */
 #define BQ76942_SA_SCD                    (1U << 7) /* 放电短路安全警报 */
-#define BQ76942_SA_OCD2                   (1U << 6) /* 放电过流2安全警报 */
-#define BQ76942_SA_OCD1                   (1U << 5) /* 放电过流1安全警报 */
-#define BQ76942_SA_OCC                    (1U << 4) /* 充电过流安全警报 */
+#define BQ76942_SA_OCD2                   (1U << 6) /* 放电过流2安全警报 --6mv*/
+#define BQ76942_SA_OCD1                   (1U << 5) /* 放电过流1安全警报 --8mv*/
+#define BQ76942_SA_OCC                    (1U << 4) /* 充电过流安全警报 --4mv */
 #define BQ76942_SA_COV                    (1U << 3) /*电芯过压安全警报*/
 #define BQ76942_SA_CUV                    (1U << 2) /*电芯欠压安全警报*/
 
@@ -147,18 +147,6 @@ typedef struct
   bool valid;
 } bq76942_meas_t;
 
-typedef struct
-{
-  uint8_t status_a; /*安全状态A*/
-  uint8_t status_b; /*安全状态B*/
-  uint8_t status_c; /*安全状态C*/
-  bool scd;   /*放电短路安全警报*/
-  bool ocd;   /*放电过流安全警报*/
-  bool occ;   /*充电过流安全警报*/
-  bool any;   /*安全状态A/B/C位有任意一个被置位*/
-  bool valid;
-} bq76942_safety_t;
-
 bool BQ76942_IsReady(I2C_HandleTypeDef *hi2c);
 bool BQ76942_ReadDirectU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t *raw);
 bool BQ76942_ReadDirectS16(I2C_HandleTypeDef *hi2c, uint8_t cmd, int16_t *raw);
@@ -188,7 +176,10 @@ bool BQ76942_ReadCellVoltages(I2C_HandleTypeDef *hi2c, uint8_t cell_count,
 bool BQ76942_ReadPackCurrent(I2C_HandleTypeDef *hi2c, int16_t *current_ma);
 bool BQ76942_ReadBatteryStatus(I2C_HandleTypeDef *hi2c, uint16_t *status);
 bool BQ76942_ReadSafetyStatus(I2C_HandleTypeDef *hi2c, bool *protect_active);
-bool BQ76942_ReadSafetyStatusEx(I2C_HandleTypeDef *hi2c, bq76942_safety_t *out);
+/** Read Safety Status A/B/C raw bytes (0x03 / 0x05 / 0x07). */
+bool BQ76942_ReadSafetyStatusEx(I2C_HandleTypeDef *hi2c,
+                                uint8_t *status_a, uint8_t *status_b,
+                                uint8_t *status_c);
 bool BQ76942_SetBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t mask);
 bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask);
 

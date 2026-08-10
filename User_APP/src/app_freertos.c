@@ -28,7 +28,6 @@
 #include "cell_balance_manager.h"
 #include "charge_path.h"
 #include "charge_manager.h"
-#include "thermal_manager.h"
 #include "bsp_power_rails.h"
 #include "bms_can_tx.h"
 #include "bms_can_debug.h"
@@ -61,7 +60,6 @@ extern I2C_HandleTypeDef hi2c2;
 
 static bq76942_temp_t s_bq_temp;
 static bq76942_meas_t s_bq_meas;
-static bq76942_safety_t s_bq_safety;
 static uint32_t s_bq_temp_fail_count;
 static uint32_t s_bq_comm_fail_count;
 static uint32_t s_bq_meas_fail_count;
@@ -106,11 +104,6 @@ const bq76942_temp_t *Bms_GetBqTemperatures(void)
 const bq76942_meas_t *Bms_GetBqMeasurements(void)
 {
   return &s_bq_meas;
-}
-
-const bq76942_safety_t *Bms_GetBqSafety(void)
-{
-  return &s_bq_safety;
 }
 
 uint32_t Bms_GetBqTempFailCount(void)
@@ -245,13 +238,11 @@ void StartPowerTask(void *argument)
   /* Wait for rails + first BQ samples from BmsTask. */
   osDelay(500);
   ChargePath_Init();
-  Thermal_Init();
-  Protect_Init();
+  BSP_PowerRails_Init();
 
   for (;;)
   {
-    Thermal_Process();
-    Protect_Process();
+    BSP_PowerRails_Process();
     ChargePath_Apply();
     osDelay(200);
   }
@@ -314,32 +305,35 @@ void StartBmsTask(void *argument)
     ChargePath_Apply();
     ChargeManager_Process(&hi2c2);
 
-    if (!BQ76942_ReadSafetyStatusEx(&hi2c2, &s_bq_safety))
     {
-      s_bq_safety.valid = false;
+      uint8_t status_a = 0U;
+      uint8_t status_b = 0U;
+      uint8_t status_c = 0U;
+      bool ok = BQ76942_ReadSafetyStatusEx(&hi2c2, &status_a, &status_b,
+                                          &status_c);
+      BSP_PowerRails_UpdateBqSafety(status_a, status_b, status_c, ok);
     }
 
     {
+      const pwr_rails_status_t *pwr = BSP_PowerRails_GetStatus();
       soh_inputs_t soh_in = {
           .meas = &s_bq_meas,
           .temp = &s_bq_temp,
-          .thermal = Thermal_GetStatus(),
+          .protect = pwr,
           .charge_state = ChargeManager_GetState(),
-          .bq_protect = s_bq_safety.valid && s_bq_safety.any,
+          .bq_protect = (pwr != NULL) && pwr->bq_valid && pwr->bq_any,
           .comm_fail_count = Bms_GetBqCommFailCount(),
       };
       Soh_Process(&soh_in, BMS_TASK_PERIOD_MS);
     }
 
     /* BQ DSG FET；失败则周期重试（24V GPIO 由电源轨仲裁）。 */
-    if (!s_dsg_enabled &&
-        (Protect_GetState() < PROTECT_STATE_FAULT) &&
-        (Thermal_GetState() < THERMAL_STATE_FAULT))
+    if (!s_dsg_enabled && (BSP_PowerRails_GetState() < PWR_STATE_FAULT))
     {
       s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
       ChargePath_Apply();
     }
-    else if (Protect_GetState() == PROTECT_STATE_FAULT)
+    else if (BSP_PowerRails_GetState() == PWR_STATE_FAULT)
     {
       s_dsg_enabled = false;
     }

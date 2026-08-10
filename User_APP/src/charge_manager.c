@@ -6,7 +6,7 @@
  */
 #include "charge_manager.h"
 #include "charge_path.h"
-#include "thermal_manager.h"
+#include "bsp_power_rails.h"
 #include "cell_balance_manager.h"
 #include "bq76942.h"
 #include "app_freertos.h"
@@ -80,7 +80,7 @@ static void ChargeManager_EnterCompleted(void)
 static bool ChargeManager_PreStartChecks(void)
 {
   const bq76942_meas_t *meas = Bms_GetBqMeasurements();
-  const thermal_status_t *thermal = Thermal_GetStatus();
+  const pwr_rails_status_t *thermal = BSP_PowerRails_GetStatus();
   const uint32_t comm_fail = Bms_GetBqCommFailCount();
 
   if ((meas == NULL) || (!meas->valid))
@@ -94,7 +94,7 @@ static bool ChargeManager_PreStartChecks(void)
   }
 
   if ((thermal != NULL) &&
-      ((thermal->state >= THERMAL_STATE_LIMIT) || (!thermal->sensor_ok)))
+      ((thermal->state >= PWR_STATE_LIMIT) || (!thermal->sensor_ok)))
   {
     return false;
   }
@@ -168,7 +168,7 @@ static bool ChargeManager_CheckProtectFault(I2C_HandleTypeDef *hi2c)
 
 static void ChargeManager_CheckFaults(I2C_HandleTypeDef *hi2c)
 {
-  const thermal_status_t *thermal = Thermal_GetStatus();
+  const pwr_rails_status_t *thermal = BSP_PowerRails_GetStatus();
   const uint32_t comm_fail = Bms_GetBqCommFailCount();
   const bq76942_meas_t *meas = Bms_GetBqMeasurements();
 
@@ -206,7 +206,7 @@ static void ChargeManager_CheckFaults(I2C_HandleTypeDef *hi2c)
     return;
   }
 
-  if ((thermal != NULL) && (thermal->state == THERMAL_STATE_FAULT))
+  if ((thermal != NULL) && (thermal->state == PWR_STATE_FAULT))
   {
     ChargeManager_SetFault(CHARGE_FAULT_THERMAL);
     return;
@@ -237,10 +237,10 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
   if (s_status.charge_paused || ChargePath_IsChargeInhibited())
   {
     /* thermal/imbalance 暂停，不改变 CC/CV 阶段 */
-    if ((Thermal_GetState() == THERMAL_STATE_FAULT) ||
+    if ((BSP_PowerRails_GetState() == PWR_STATE_FAULT) ||
         ChargePath_IsImbalanceChargeInhibit())
     {
-      if (Thermal_GetState() == THERMAL_STATE_FAULT)
+      if (BSP_PowerRails_GetState() == PWR_STATE_FAULT)
       {
         ChargeManager_SetFault(CHARGE_FAULT_THERMAL);
       }
@@ -374,7 +374,7 @@ void ChargeManager_Stop(void)
 
 bool ChargeManager_ClearFault(void)
 {
-  const thermal_status_t *thermal = Thermal_GetStatus();
+  const pwr_rails_status_t *thermal = BSP_PowerRails_GetStatus();
   const uint32_t comm_fail = Bms_GetBqCommFailCount();
 
   if (s_status.state != CHARGE_STATE_FAULT)
@@ -388,7 +388,7 @@ bool ChargeManager_ClearFault(void)
   }
 
   if ((thermal != NULL) &&
-      ((thermal->state == THERMAL_STATE_FAULT) || (!thermal->sensor_ok)))
+      ((thermal->state == PWR_STATE_FAULT) || (!thermal->sensor_ok)))
   {
     return false;
   }
