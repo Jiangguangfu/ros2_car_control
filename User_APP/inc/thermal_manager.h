@@ -5,7 +5,8 @@
  *
  * Levels (cell/pack NTC, °C*10, with hysteresis):
  *   NORMAL → WARN → LIMIT → FAULT
- * Actuators: SYS_FAN_PWM; FET-off via charge_path (OR with imbalance).
+ * Actuators: multi-rail outputs (24/19/12/6.5/5 V), SYS_FAN_PWM;
+ *            FET-off via charge_path (OR with imbalance).
  ******************************************************************************
  */
 #ifndef THERMAL_MANAGER_H
@@ -42,6 +43,7 @@ typedef struct
   int16_t tmin_c_x10;      /* min(TS1, TS2) */
   int16_t die_c_x10;       /*内部芯片温度*/
   uint8_t fan_duty_percent;/*风扇pwm占空比*/
+  uint8_t power_rails_mask;/* 已开启电源轨位掩码 (bsp_power_rails) */
   bool charge_inhibit;     /* CFETOFF asserted 充电禁止*/
   bool discharge_inhibit;  /* DFETOFF asserted 放电禁止*/
   bool sensor_ok;          /*传感器是否正常*/

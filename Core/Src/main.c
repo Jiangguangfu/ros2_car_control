@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "bms_can_tx.h"
 #include "bms_can_ext_tx.h"
+#include "bsp_power_rails.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -77,19 +78,7 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void BMS_EnablePowerRails(void)
-{
-  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
-  HAL_Delay(300);
-  HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, GPIO_PIN_SET);
-  HAL_Delay(300);
-  HAL_GPIO_WritePin(PWR_7V5_EN_GPIO_Port, PWR_7V5_EN_Pin, GPIO_PIN_SET);
-  HAL_Delay(200);
-  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_SET);
-  HAL_Delay(200);
-}
+
 /* USER CODE END 0 */
 
 /**
@@ -121,7 +110,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  BMS_EnablePowerRails();
+  /* FET-off safe defaults before rails come up. */
+  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
+  BSP_PowerRails_BootSequence();
   MX_GPDMA1_Init();
   MX_ADC1_Init();
   MX_I2C2_Init();

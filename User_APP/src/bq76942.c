@@ -447,9 +447,7 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
     return false;
   }
 
-  /* PC13: 24V bypass control — board path enable (independent of BQ I2C). */
-  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_SET);
-
+  /* 24V bypass: thermal_manager / boot sequence owns GPIO. */
   /* Release host DFETOFF for pack discharge; CFETOFF owned by charge_path. */
   HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_RESET);
 

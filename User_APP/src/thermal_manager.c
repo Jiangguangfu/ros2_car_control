@@ -6,6 +6,7 @@
  */
 #include "thermal_manager.h"
 #include "bsp_fan.h"
+#include "bsp_power_rails.h"
 #include "charge_path.h"
 #include "app_freertos.h"
 #include "main.h"
@@ -39,9 +40,32 @@ static void Thermal_SetFetOff(bool charge_off, bool discharge_off)
   ChargePath_Apply();
 }
 
+static uint8_t Thermal_PowerMaskForState(void)
+{
+  switch (s_status.state)
+  {
+    case THERMAL_STATE_FAULT:
+      return 0U;
+
+    case THERMAL_STATE_LIMIT:
+      /* 低温限充：保持全部输出；高温限充：先关 19V 降压降热。 */
+      if (s_status.reason == THERMAL_REASON_COLD_CHARGE)
+      {
+        return PWR_MASK_ALL;
+      }
+      return (uint8_t)(PWR_MASK_24V | PWR_MASK_12V | PWR_MASK_6V5 | PWR_MASK_5V);
+
+    case THERMAL_STATE_WARN:
+    case THERMAL_STATE_NORMAL:
+    default:
+      return PWR_MASK_ALL;
+  }
+}
+
 static void Thermal_ApplyActuators(void)
 {
   uint8_t duty = THERMAL_FAN_DUTY_NORMAL;
+  uint8_t pwr_mask = Thermal_PowerMaskForState();
   bool chg_off = false;
   bool dsg_off = false;
 
@@ -59,6 +83,7 @@ static void Thermal_ApplyActuators(void)
       duty = THERMAL_FAN_DUTY_FAULT;
       chg_off = true;
       dsg_off = true;
+      pwr_mask = 0U;
       break;
     case THERMAL_STATE_NORMAL:
     default:
@@ -66,7 +91,9 @@ static void Thermal_ApplyActuators(void)
   }
 
   s_status.fan_duty_percent = duty;
+  s_status.power_rails_mask = pwr_mask;
   BSP_Fan_SetDutyPercent(duty);
+  BSP_PowerRails_ApplyMask(pwr_mask);
   Thermal_SetFetOff(chg_off, dsg_off);
 }
 
@@ -121,13 +148,16 @@ void Thermal_Init(void)
   s_status.tmin_c_x10 = 0;
   s_status.die_c_x10 = 0;
   s_status.fan_duty_percent = 0U;
+  s_status.power_rails_mask = PWR_MASK_ALL;
   s_status.charge_inhibit = false;
   s_status.discharge_inhibit = false;
   s_status.sensor_ok = false;
   s_fault_latched = false;
 
   BSP_Fan_Init();
+  BSP_PowerRails_Init();
   Thermal_SetFetOff(false, false);
+  Thermal_ApplyActuators();
 }
 
 void Thermal_Process(void)
@@ -136,13 +166,24 @@ void Thermal_Process(void)
   const uint32_t fail_count = Bms_GetBqTempFailCount();
   thermal_state_t next;
 
-  if ((temp == NULL) || (!temp->valid) || (fail_count >= THERMAL_SENSOR_FAIL_THRESHOLD))
+  if (temp == NULL)
+  {
+    return;
+  }
+
+  if (fail_count >= THERMAL_SENSOR_FAIL_THRESHOLD)
   {
     s_status.sensor_ok = false;
     s_status.state = THERMAL_STATE_FAULT;
     s_status.reason = THERMAL_REASON_SENSOR;
     s_fault_latched = true;
     Thermal_ApplyActuators();
+    return;
+  }
+
+  if (!temp->valid)
+  {
+    /* BmsTask bring-up: keep boot rails until stable BQ reads. */
     return;
   }
 
