@@ -180,6 +180,7 @@ static void PowerRails_EvalThermal(void)
 {
   const bq76942_temp_t *temp = Bms_GetBqTemperatures();
   const uint32_t fail_count = Bms_GetBqTempFailCount();
+  pwr_state_t prev;
   pwr_state_t next;
 
   if (temp == NULL)
@@ -208,6 +209,7 @@ static void PowerRails_EvalThermal(void)
   s_status.tmin_c_x10 = (temp->ts1_temp_c_x10 < temp->ts2_temp_c_x10) ?
                         temp->ts1_temp_c_x10 : temp->ts2_temp_c_x10;
 
+  /* Sensor fault: auto-recover once reads are healthy. */
   if (s_thermal_latched && (s_thermal_reason == PWR_REASON_SENSOR))
   {
     s_thermal_latched = false;
@@ -215,7 +217,21 @@ static void PowerRails_EvalThermal(void)
     s_thermal_reason = PWR_REASON_NONE;
   }
 
-  next = PowerRails_EvalHotState(s_status.tmax_c_x10, s_thermal_state);
+  /* Hot fault: auto-recover when cooled to FAULT exit threshold. */
+  if (s_thermal_latched && (s_thermal_reason == PWR_REASON_HOT) &&
+      (s_status.tmax_c_x10 <= THERMAL_FAULT_EXIT_CX10))
+  {
+    s_thermal_latched = false;
+  }
+
+  prev = s_thermal_state;
+  if ((!s_thermal_latched) && (prev == PWR_STATE_FAULT))
+  {
+    /* Allow EvalHotState to leave FAULT after latch cleared. */
+    prev = PWR_STATE_LIMIT;
+  }
+
+  next = PowerRails_EvalHotState(s_status.tmax_c_x10, prev);
 
   if (next == PWR_STATE_FAULT)
   {
@@ -248,6 +264,7 @@ static void PowerRails_EvalThermal(void)
     s_thermal_reason = PWR_REASON_HOT;
   }
 
+  /* Hold hot FAULT until cooled (auto-recover above). */
   if (s_thermal_latched && (s_thermal_reason == PWR_REASON_HOT))
   {
     next = PWR_STATE_FAULT;
@@ -259,6 +276,32 @@ static void PowerRails_EvalThermal(void)
 /* -------------------------------------------------------------------------- */
 /* Current / BQ OC-SC evaluation                                              */
 /* -------------------------------------------------------------------------- */
+
+static bool PowerRails_CurrentClearOk(void)
+{
+  const bq76942_meas_t *meas;
+  int16_t i_abs;
+
+  if (!s_status.bq_valid)
+  {
+    return false;
+  }
+
+  if (s_status.scd || s_status.ocd || s_status.occ)
+  {
+    return false;
+  }
+
+  meas = Bms_GetBqMeasurements();
+  if ((meas == NULL) || (!meas->valid))
+  {
+    return false;
+  }
+
+  i_abs = (meas->current_ma < 0) ?
+          (int16_t)(-meas->current_ma) : meas->current_ma;
+  return (i_abs <= PROTECT_SOFT_CLEAR_MA);
+}
 
 static void PowerRails_EvalCurrent(void)
 {
@@ -274,6 +317,15 @@ static void PowerRails_EvalCurrent(void)
   }
   s_status.pack_current_ma = i_ma;
   i_abs = (i_ma < 0) ? (int16_t)(-i_ma) : i_ma;
+
+  /* SCD/OCD/soft-OCD: auto-recover when BQ flags clear and |I| is low. */
+  if (s_current_latched && PowerRails_CurrentClearOk())
+  {
+    s_current_latched = false;
+    s_soft_warn_count = 0U;
+    s_soft_fault_count = 0U;
+    s_current_reason = PWR_REASON_NONE;
+  }
 
   if (s_status.bq_valid)
   {
@@ -291,6 +343,7 @@ static void PowerRails_EvalCurrent(void)
     }
     else if (s_status.occ)
     {
+      /* OCC follows BQ flag — no latch; clears when OCC bit drops. */
       next = PWR_STATE_FAULT;
       reason = PWR_REASON_OCC;
     }
@@ -344,20 +397,15 @@ static void PowerRails_EvalCurrent(void)
     }
   }
 
-  if (s_current_latched &&
-      ((s_current_reason == PWR_REASON_SCD) ||
-       (s_current_reason == PWR_REASON_OCD) ||
-       (s_current_reason == PWR_REASON_SOFT_OCD)))
+  /* Hold latched SCD/OCD/soft-OCD until auto-recover clears the latch. */
+  if (s_current_latched)
   {
     next = PWR_STATE_FAULT;
-    reason = s_current_reason;
-  }
-
-  if ((next == PWR_STATE_NORMAL) &&
-      (s_current_reason == PWR_REASON_OCC) &&
-      (!s_current_latched))
-  {
-    reason = PWR_REASON_NONE;
+    if ((reason != PWR_REASON_SCD) && (reason != PWR_REASON_OCD) &&
+        (reason != PWR_REASON_SOFT_OCD))
+    {
+      reason = s_current_reason;
+    }
   }
 
   s_current_state = next;
@@ -605,84 +653,19 @@ pwr_state_t BSP_PowerRails_GetState(void)
 
 bool BSP_PowerRails_ClearFault(void)
 {
-  const bq76942_meas_t *meas = Bms_GetBqMeasurements();
-  int16_t i_abs;
-  bool cleared = false;
+  bool had_fault = (s_status.state == PWR_STATE_FAULT) ||
+                   s_thermal_latched || s_current_latched;
 
-  if (s_status.state != PWR_STATE_FAULT)
+  if (!had_fault)
   {
     return false;
   }
 
-  /* Clear current latch if BQ flags and soft current are OK. */
-  if (s_current_latched || (s_current_state == PWR_STATE_FAULT))
-  {
-    if (!s_status.bq_valid)
-    {
-      return false;
-    }
-    if (s_status.scd || s_status.ocd || s_status.occ)
-    {
-      return false;
-    }
-    if ((meas == NULL) || (!meas->valid))
-    {
-      return false;
-    }
-    i_abs = (meas->current_ma < 0) ?
-            (int16_t)(-meas->current_ma) : meas->current_ma;
-    if (i_abs > PROTECT_SOFT_CLEAR_MA)
-    {
-      return false;
-    }
+  /* Same auto-recover rules as Process(); re-evaluate immediately. */
+  PowerRails_EvalThermal();
+  PowerRails_EvalCurrent();
+  PowerRails_ApplyActuators();
 
-    s_current_latched = false;
-    s_current_state = PWR_STATE_NORMAL;
-    s_current_reason = PWR_REASON_NONE;
-    s_soft_warn_count = 0U;
-    s_soft_fault_count = 0U;
-    cleared = true;
-  }
-
-  /* Clear thermal hot latch when cooled. */
-  if (s_thermal_latched || (s_thermal_state == PWR_STATE_FAULT))
-  {
-    if (!s_status.sensor_ok)
-    {
-      return false;
-    }
-    if (s_status.tmax_c_x10 > THERMAL_FAULT_EXIT_CX10)
-    {
-      return false;
-    }
-    if (s_thermal_reason == PWR_REASON_SENSOR)
-    {
-      return false;
-    }
-
-    s_thermal_latched = false;
-    s_thermal_state = PowerRails_EvalHotState(s_status.tmax_c_x10,
-                                              PWR_STATE_LIMIT);
-    if (s_status.tmin_c_x10 < THERMAL_COLD_ENTER_CX10)
-    {
-      s_thermal_state = PWR_STATE_LIMIT;
-      s_thermal_reason = PWR_REASON_COLD_CHARGE;
-    }
-    else if (s_thermal_state == PWR_STATE_NORMAL)
-    {
-      s_thermal_reason = PWR_REASON_NONE;
-    }
-    else
-    {
-      s_thermal_reason = PWR_REASON_HOT;
-    }
-    cleared = true;
-  }
-
-  if (cleared)
-  {
-    PowerRails_ApplyActuators();
-  }
-
-  return cleared;
+  return (s_status.state != PWR_STATE_FAULT) &&
+         (!s_thermal_latched) && (!s_current_latched);
 }

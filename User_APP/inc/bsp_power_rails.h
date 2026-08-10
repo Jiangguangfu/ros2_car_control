@@ -106,7 +106,10 @@ void BSP_PowerRails_Process(void);
 const pwr_rails_status_t *BSP_PowerRails_GetStatus(void);
 pwr_state_t BSP_PowerRails_GetState(void);
 
-/** Clear latched FAULT when thermal/current conditions allow. */
+/**
+ * Optional: force one recover evaluation now.
+ * Process() already auto-recovers: hot when cooled, OC/SC when flags/current clear.
+ */
 bool BSP_PowerRails_ClearFault(void);
 
 #ifdef __cplusplus

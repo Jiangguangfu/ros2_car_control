@@ -58,6 +58,16 @@ BmsTask           — BQ76942 采样 + Safety A/B/C + 均衡/充电/SOC/SOH（50
 
 BmsTask 读 Safety Status A/B/C 原始字节后调用 `BSP_PowerRails_UpdateBqSafety()` 缓存到状态（`status_a/b/c` + 解析 `scd/ocd/occ/bq_any`）。
 
+故障恢复（`BSP_PowerRails_Process` 内自动，无需人工 Clear）：
+
+| 故障 | 恢复条件 |
+|------|----------|
+| 过热 FAULT | Tmax ≤ 50 °C（`THERMAL_FAULT_EXIT`） |
+| 传感器 FAULT | 温度读数恢复有效 |
+| 低温 LIMIT | Tmin ≥ 3 °C |
+| SCD / OCD / 软过流 | BQ 对应位清除且 \|I\| ≤ 2 A |
+| OCC | BQ OCC 位清除（不锁存） |
+
 ## 被动均衡（cell_balance_manager）
 
 ### 功能
