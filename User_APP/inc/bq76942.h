@@ -4,7 +4,7 @@
  * @brief   BQ76942 I2C helpers: temperature, cells, FET, passive balance, meas.
  *
  * Schematic (BQ76942PBR):
- *   TS1/TS2 — NTC; TS3 — SW2
+ *   TS1 — NTC (protect); TS2 — NTC (report only); TS3 — SW2
  *   PC13 PWR_24V_BYPASS_EN + BQ_DFETOFF low + FET_ENABLE + ALL_FETS_ON → 24V out
  ******************************************************************************
  */
@@ -73,6 +73,13 @@ extern "C" {
 
 /* Data memory: Calibration:V Divider Offset:Vdiv Offset (I2, userV). */
 #define BQ76942_DM_Vdiv_OFFSET            0x91B2U
+/* Settings:Configuration:TS2 Config (H1). TRM 13.3.2.13 @ 0x92FE. */
+#define BQ76942_DM_TS2_CONFIG             0x92FEU
+/*
+ * TS2: 18k pullup + 18K thermistor model + report-only (no cell/FET protect).
+ * PIN_FXN=3 (thermistor). Same as TS1 0x07 but OPT[1:0]=10 instead of 01.
+ */
+#define BQ76942_TS2_CONFIG_REPORT_ONLY    0x0BU
 /* cV mode: 100 = 1 V，写入 Stack/PACK/LD 的 Vdiv Offset (0x91B2)。 */
 #define BQ76942_Vdiv_OFFSET_VALUE         100
 
