@@ -1,0 +1,4 @@
+CompileFlags:
+  Add:
+    # arm-none-eabi-gcc query-driver omits this GCC builtin include dir (stdbool.h, etc.)
+    - -isystem/usr/lib/gcc/arm-none-eabi/10.3.1/include
