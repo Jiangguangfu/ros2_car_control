@@ -173,6 +173,143 @@ bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
   return true;
 }
 
+bool BQ76942_DataMemoryRead(I2C_HandleTypeDef *hi2c, uint16_t addr,
+                            uint8_t *data, uint8_t len)
+{
+  uint8_t addr_buf[2];
+
+  if ((hi2c == NULL) || (data == NULL) || (len == 0U) || (len > 32U))
+  {
+    return false;
+  }
+
+  addr_buf[0] = (uint8_t)(addr & 0xFFU);
+  addr_buf[1] = (uint8_t)((addr >> 8) & 0xFFU);
+
+  if (HAL_I2C_Mem_Write(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_REG_CMD_LOW,
+                        I2C_MEMADD_SIZE_8BIT, addr_buf, sizeof(addr_buf),
+                        BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    return false;
+  }
+
+  osDelay(BQ76942_SUBCMD_WAIT_MS);
+
+  return (HAL_I2C_Mem_Read(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_REG_DATA_START,
+                           I2C_MEMADD_SIZE_8BIT, data, len,
+                           BQ76942_I2C_TIMEOUT_MS) == HAL_OK);
+}
+
+static const uint16_t s_scd_threshold_mv[16] = {
+  10U,  20U,  40U,  60U,  80U,  100U, 125U, 150U,
+  175U, 200U, 250U, 300U, 350U, 400U, 450U, 500U
+};
+
+static uint16_t Bq76942_ThresholdCodeToMv(uint8_t code)
+{
+  return (uint16_t)((uint16_t)code * 2U);
+}
+
+static uint16_t Bq76942_ProtDelayMsX10(uint8_t code)
+{
+  if (code == 0U)
+  {
+    return 0U;
+  }
+
+  /* TRM: 3.3 ms × (2 + setting) → store as 0.1 ms. */
+  return (uint16_t)(33U * (2U + (uint16_t)code));
+}
+
+static uint16_t Bq76942_ScdDelayUs(uint8_t code)
+{
+  if (code == 0U)
+  {
+    return 0U;
+  }
+
+  return (uint16_t)((code - 1U) * 15U);
+}
+
+static uint16_t Bq76942_MvToMa(uint16_t threshold_mv)
+{
+  if (BQ76942_SENSE_RESISTOR_MOHM <= 0.0f)
+  {
+    return 0U;
+  }
+
+  return (uint16_t)((float)threshold_mv / BQ76942_SENSE_RESISTOR_MOHM);
+}
+
+bool BQ76942_ReadProtectionConfig(I2C_HandleTypeDef *hi2c,
+                                  bq76942_prot_cfg_t *out)
+{
+  uint8_t block[BQ76942_DM_PROT_BLOCK_LEN];
+  uint8_t enabled_prot_a = 0U;
+
+  if ((hi2c == NULL) || (out == NULL))
+  {
+    return false;
+  }
+
+  (void)memset(out, 0, sizeof(*out));
+
+  if (!BQ76942_IsReady(hi2c))
+  {
+    return false;
+  }
+
+  if (!BQ76942_DataMemoryRead(hi2c, BQ76942_DM_ENABLED_PROT_A,
+                              &enabled_prot_a, 1U))
+  {
+    return false;
+  }
+
+  if (!BQ76942_DataMemoryRead(hi2c, BQ76942_DM_OCC_THRESHOLD,
+                              block, (uint8_t)sizeof(block)))
+  {
+    return false;
+  }
+
+  out->enabled_prot_a = enabled_prot_a;
+  out->occ_enabled = ((enabled_prot_a & BQ76942_PROT_A_OCC) != 0U);
+  out->ocd1_enabled = ((enabled_prot_a & BQ76942_PROT_A_OCD1) != 0U);
+  out->ocd2_enabled = ((enabled_prot_a & BQ76942_PROT_A_OCD2) != 0U);
+  out->scd_enabled = ((enabled_prot_a & BQ76942_PROT_A_SCD) != 0U);
+
+  out->occ_threshold_code = block[0];
+  out->occ_delay_code = block[1];
+  out->ocd1_threshold_code = block[2];
+  out->ocd1_delay_code = block[3];
+  out->ocd2_threshold_code = block[4];
+  out->ocd2_delay_code = block[5];
+  out->scd_threshold_code = block[6];
+  out->scd_delay_code = block[7];
+
+  out->occ_threshold_mv = Bq76942_ThresholdCodeToMv(out->occ_threshold_code);
+  out->ocd1_threshold_mv = Bq76942_ThresholdCodeToMv(out->ocd1_threshold_code);
+  out->ocd2_threshold_mv = Bq76942_ThresholdCodeToMv(out->ocd2_threshold_code);
+
+  if (out->scd_threshold_code < (uint8_t)(sizeof(s_scd_threshold_mv) /
+                                         sizeof(s_scd_threshold_mv[0])))
+  {
+    out->scd_threshold_mv = s_scd_threshold_mv[out->scd_threshold_code];
+  }
+
+  out->occ_delay_ms_x10 = Bq76942_ProtDelayMsX10(out->occ_delay_code);
+  out->ocd1_delay_ms_x10 = Bq76942_ProtDelayMsX10(out->ocd1_delay_code);
+  out->ocd2_delay_ms_x10 = Bq76942_ProtDelayMsX10(out->ocd2_delay_code);
+  out->scd_delay_us = Bq76942_ScdDelayUs(out->scd_delay_code);
+
+  out->occ_trip_ma = Bq76942_MvToMa(out->occ_threshold_mv);
+  out->ocd1_trip_ma = Bq76942_MvToMa(out->ocd1_threshold_mv);
+  out->ocd2_trip_ma = Bq76942_MvToMa(out->ocd2_threshold_mv);
+  out->scd_trip_ma = Bq76942_MvToMa(out->scd_threshold_mv);
+
+  out->valid = true;
+  return true;
+}
+
 bool BQ76942_SubCommandWrite(I2C_HandleTypeDef *hi2c, uint16_t subcmd)
 {
   uint8_t buf[2];
@@ -287,6 +424,47 @@ bool BQ76942_WriteScdDelay(I2C_HandleTypeDef *hi2c, uint8_t delay_code)
   return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_SCD_DELAY, &delay_code, 1U);
 }
 
+bool BQ76942_WriteProtectionConfig(I2C_HandleTypeDef *hi2c)
+{
+  uint8_t enabled_prot_a = BQ76942_ENABLED_PROT_A;
+  uint8_t chg_fet_prot_a = BQ76942_CHG_FET_PROT_A;
+  uint8_t dsg_fet_prot_a = BQ76942_DSG_FET_PROT_A;
+  uint8_t block[BQ76942_DM_PROT_BLOCK_LEN];
+  bool ok;
+
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  if ((BQ76942_OCC_THRESHOLD < 2U) || (BQ76942_OCC_DELAY == 0U) ||
+      (BQ76942_OCD1_THRESHOLD < 2U) || (BQ76942_OCD1_DELAY == 0U) ||
+      (BQ76942_OCD2_THRESHOLD < 2U) || (BQ76942_OCD2_DELAY == 0U) ||
+      (BQ76942_SCD_DELAY == 0U))
+  {
+    return false;
+  }
+
+  block[0] = BQ76942_OCC_THRESHOLD;
+  block[1] = BQ76942_OCC_DELAY;
+  block[2] = BQ76942_OCD1_THRESHOLD;
+  block[3] = BQ76942_OCD1_DELAY;
+  block[4] = BQ76942_OCD2_THRESHOLD;
+  block[5] = BQ76942_OCD2_DELAY;
+  block[6] = BQ76942_SCD_THRESHOLD;
+  block[7] = BQ76942_SCD_DELAY;
+
+  ok = BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_ENABLED_PROT_A,
+                               &enabled_prot_a, 1U);
+  ok = ok && BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_CHG_FET_PROT_A,
+                                     &chg_fet_prot_a, 1U);
+  ok = ok && BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_DSG_FET_PROT_A,
+                                     &dsg_fet_prot_a, 1U);
+  ok = ok && BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_OCC_THRESHOLD,
+                                     block, (uint8_t)sizeof(block));
+  return ok;
+}
+
 static bool BQ76942_WriteTs2Config(I2C_HandleTypeDef *hi2c, uint8_t config)
 {
   return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_TS2_CONFIG, &config, 1U);
@@ -318,7 +496,7 @@ bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
 
   ok = BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
   ok = ok && BQ76942_WriteCcGain(hi2c, cc_gain);
-  ok = ok && BQ76942_WriteScdDelay(hi2c, BQ76942_SCD_DELAY);
+  ok = ok && BQ76942_WriteProtectionConfig(hi2c);
   ok = ok && BQ76942_WriteTs2Config(hi2c, BQ76942_TS2_CONFIG_REPORT_ONLY);
 
   if (!BQ76942_SubCommandWrite(hi2c, BQ76942_SUBCMD_CONFIG_UPDATE_EXIT))

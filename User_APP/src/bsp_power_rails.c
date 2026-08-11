@@ -29,7 +29,7 @@
 
 /* Soft discharge OC (mA). */
 #define PROTECT_SOFT_OCD_WARN_MA          12000
-#define PROTECT_SOFT_OCD_FAULT_MA         20000
+#define PROTECT_SOFT_OCD_FAULT_MA         15000
 #define PROTECT_SOFT_OCD_WARN_DEBOUNCE       3U
 #define PROTECT_SOFT_OCD_FAULT_DEBOUNCE      2U
 #define PROTECT_SOFT_CLEAR_MA             2000

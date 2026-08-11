@@ -60,6 +60,7 @@ extern I2C_HandleTypeDef hi2c2;
 
 static bq76942_temp_t s_bq_temp;
 static bq76942_meas_t s_bq_meas;
+static bq76942_prot_cfg_t s_bq_prot_cfg;
 static uint32_t s_bq_temp_fail_count;
 static uint32_t s_bq_comm_fail_count;
 static uint32_t s_bq_meas_fail_count;
@@ -130,6 +131,11 @@ void Bms_RecordBqI2cResult(bool success)
 uint32_t Bms_GetBqMeasFailCount(void)
 {
   return s_bq_meas_fail_count;
+}
+
+const bq76942_prot_cfg_t *Bms_GetBqProtectionConfig(void)
+{
+  return &s_bq_prot_cfg;
 }
 
 /* USER CODE END FunctionPrototypes */
@@ -261,6 +267,7 @@ void StartBmsTask(void *argument)
   /* USER CODE BEGIN BmsTask */
   static bool s_dsg_enabled = false;
   static bool s_bq_calibrated = false;
+  static bool s_bq_prot_read = false;
   (void)argument;
 
   /* Wait for power rails (ServiceTask enables 7V5/12V). */
@@ -270,12 +277,16 @@ void StartBmsTask(void *argument)
   Balance_Init();
   Soc_Init();
   Soh_Init();
-
   for (;;)
   {
     if (!s_bq_calibrated)
     {
       s_bq_calibrated = BQ76942_InitCalibration(&hi2c2);
+    }
+
+    if (s_bq_calibrated && !s_bq_prot_read)
+    {
+      s_bq_prot_read = BQ76942_ReadProtectionConfig(&hi2c2, &s_bq_prot_cfg);
     }
 
     if (BQ76942_ReadTemperatures(&hi2c2, &s_bq_temp))

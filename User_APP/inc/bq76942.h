@@ -65,6 +65,59 @@ extern "C" {
 #define BQ76942_CC_GAIN_RSENSE_FACTOR     7.4768f
 #define BQ76942_CAPACITY_GAIN_FACTOR      298261.6178f
 
+/* Data memory: Settings:Protection (TRM 13.3.3). */
+#define BQ76942_DM_ENABLED_PROT_A         0x9261U /* U1, default 0x88 */
+#define BQ76942_DM_CHG_FET_PROT_A         0x9265U /* U1, default 0x98 */
+#define BQ76942_PROT_A_SCD                (1U << 7)
+#define BQ76942_PROT_A_OCD2               (1U << 6)
+#define BQ76942_PROT_A_OCD1               (1U << 5)
+#define BQ76942_PROT_A_OCC                (1U << 4)
+#define BQ76942_PROT_A_COV                (1U << 3)
+#define BQ76942_PROT_A_CUV                (1U << 2)
+#ifndef BQ76942_ENABLED_PROT_A
+/* 0x88 (SCD+COV) + OCC + OCD1 + OCD2. */
+#define BQ76942_ENABLED_PROT_A            (0x88U | BQ76942_PROT_A_OCC | \
+                                             BQ76942_PROT_A_OCD1 | BQ76942_PROT_A_OCD2)
+#endif
+#ifndef BQ76942_CHG_FET_PROT_A
+#define BQ76942_CHG_FET_PROT_A            0x98U /* OCC+COV+SCD shut CHG FET (TRM default) */
+#endif
+#define BQ76942_DM_DSG_FET_PROT_A         0x9269U
+#ifndef BQ76942_DSG_FET_PROT_A
+#define BQ76942_DSG_FET_PROT_A            0xE4U /* SCD+OCD1+OCD2 shut DSG FET (TRM default) */
+#endif
+
+/* Data memory: Protections:OCC (TRM 13.6.4). Threshold U1 in 2 mV across sense. */
+#define BQ76942_DM_OCC_THRESHOLD          0x9280U
+#define BQ76942_DM_OCC_DELAY              0x9281U /* U1, 3.3 ms × (2+N) */
+#define BQ76942_DM_OCD1_THRESHOLD         0x9282U /* U1, units of 2 mV */
+#define BQ76942_DM_OCD1_DELAY             0x9283U
+#define BQ76942_DM_OCD2_THRESHOLD         0x9284U /* U1, units of 2 mV */
+#define BQ76942_DM_OCD2_DELAY             0x9285U
+#define BQ76942_DM_SCD_THRESHOLD          0x9286U /* U1, discrete mV table 0..15 */
+#define BQ76942_DM_PROT_BLOCK_LEN         8U      /* 0x9280..0x9287 contiguous */
+#ifndef BQ76942_OCC_THRESHOLD
+#define BQ76942_OCC_THRESHOLD             0x02U /* 2×2 mV = 4 mV → 4 A @ 1 mΩ */
+#endif
+#ifndef BQ76942_OCC_DELAY
+#define BQ76942_OCC_DELAY                 0x04U /* ≈20 ms */
+#endif
+#ifndef BQ76942_OCD1_THRESHOLD
+#define BQ76942_OCD1_THRESHOLD            0x04U /* TRM default, 8 mV */
+#endif
+#ifndef BQ76942_OCD1_DELAY
+#define BQ76942_OCD1_DELAY                0x01U /* TRM default, ≈10 ms */
+#endif
+#ifndef BQ76942_OCD2_THRESHOLD
+#define BQ76942_OCD2_THRESHOLD            0x03U /* TRM default, 6 mV */
+#endif
+#ifndef BQ76942_OCD2_DELAY
+#define BQ76942_OCD2_DELAY                0x07U /* TRM default */
+#endif
+#ifndef BQ76942_SCD_THRESHOLD
+#define BQ76942_SCD_THRESHOLD             0x02U /* TRM table index 2 = 40 mV */
+#endif
+
 /* Data memory: Protections:SCD:Delay (U1, 1–31 → (N-1)×15µs). */
 #define BQ76942_DM_SCD_DELAY              0x9287U
 #ifndef BQ76942_SCD_DELAY
@@ -122,6 +175,42 @@ extern "C" {
 #define BQ76942_SA_COV                    (1U << 3) /*电芯过压安全警报*/
 #define BQ76942_SA_CUV                    (1U << 2) /*电芯欠压安全警报*/
 
+/** BQ76942 data memory protection thresholds/delays read from chip. */
+typedef struct
+{
+  uint8_t enabled_prot_a;
+  bool occ_enabled;
+  bool ocd1_enabled;
+  bool ocd2_enabled;
+  bool scd_enabled;
+
+  uint8_t occ_threshold_code;
+  uint8_t occ_delay_code;
+  uint8_t ocd1_threshold_code;
+  uint8_t ocd1_delay_code;
+  uint8_t ocd2_threshold_code;
+  uint8_t ocd2_delay_code;
+  uint8_t scd_threshold_code;
+  uint8_t scd_delay_code;
+
+  uint16_t occ_threshold_mv;
+  uint16_t ocd1_threshold_mv;
+  uint16_t ocd2_threshold_mv;
+  uint16_t scd_threshold_mv;
+
+  uint16_t occ_delay_ms_x10;   /* 3.3 ms × (2 + code) */
+  uint16_t ocd1_delay_ms_x10;
+  uint16_t ocd2_delay_ms_x10;
+  uint16_t scd_delay_us;       /* (code - 1) × 15 µs */
+
+  uint16_t occ_trip_ma;        /* @ BQ76942_SENSE_RESISTOR_MOHM */
+  uint16_t ocd1_trip_ma;
+  uint16_t ocd2_trip_ma;
+  uint16_t scd_trip_ma;
+
+  bool valid;
+} bq76942_prot_cfg_t;
+
 typedef struct
 {
   int16_t int_temp_0p1k;
@@ -163,13 +252,21 @@ bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out);
 
 bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
                              const uint8_t *data, uint8_t len);
+/** Read data memory: write addr to 0x3E, read len bytes from 0x40. */
+bool BQ76942_DataMemoryRead(I2C_HandleTypeDef *hi2c, uint16_t addr,
+                            uint8_t *data, uint8_t len);
+/** Read OCC/OCD/SCD threshold + delay from chip data memory. */
+bool BQ76942_ReadProtectionConfig(I2C_HandleTypeDef *hi2c,
+                                  bq76942_prot_cfg_t *out);
 /** Write Vdiv Offset to 0x91B2 (requires CONFIG_UPDATE). Call once at init. */
 bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv);
 /** Write CC Gain (0x91A8) + Capacity Gain (0x91AC); requires CONFIG_UPDATE. */
 bool BQ76942_WriteCcGain(I2C_HandleTypeDef *hi2c, float cc_gain);
 /** Write Protections:SCD:Delay @ 0x9287; requires CONFIG_UPDATE. */
 bool BQ76942_WriteScdDelay(I2C_HandleTypeDef *hi2c, uint8_t delay_code);
-/** 上电后写入 Vdiv Offset + CC Gain 校准，成功返回 true。 */
+/** Write OCC/OCD/SCD protection enable + thresholds/delays; requires CONFIG_UPDATE. */
+bool BQ76942_WriteProtectionConfig(I2C_HandleTypeDef *hi2c);
+/** 上电后写入 Vdiv Offset + CC Gain + 保护配置，成功返回 true。 */
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c);
 
 bool BQ76942_SubCommandWrite(I2C_HandleTypeDef *hi2c, uint16_t subcmd);
