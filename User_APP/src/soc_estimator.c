@@ -14,14 +14,14 @@
 #define SOC_REST_CURRENT_MA              50
 #define SOC_REST_BLEND_DIV                5   /* 静置时向 OCV 收敛 1/5 步长 */
 
-/** SOH：充电电流 > 此值视为充电会话 */
-#define SOH_CHARGE_SESSION_MA             50
-/** SOH：自低 SOC 起充才学习（%） */
-#define SOH_CHARGE_START_SOC_MAX          25U
-/** SOH：单次充电增量超过标称此比例也可学习 */
-#define SOH_CHARGE_SESSION_MIN_PCT          50U
+/** 满充容量学习：充电电流 > 此值视为充电会话 */
+#define SOC_LEARN_CHARGE_SESSION_MA         50
+/** 满充容量学习：自低 SOC 起充才学习（%） */
+#define SOC_LEARN_CHARGE_START_SOC_MAX      25U
+/** 满充容量学习：单次充电增量超过标称此比例也可学习 */
+#define SOC_LEARN_CHARGE_SESSION_MIN_PCT      50U
 
-static soc_status_t s_status;
+static soc_status_t s_soc_status;
 static int64_t s_remaining_uah; /*剩余容量，单位：µAh*/
 static int64_t s_coulomb_remainder;/*库仑计剩余容量，单位：µAh*/
 static bool s_inited;
@@ -77,17 +77,17 @@ static uint8_t Soc_VoltagePercent(uint16_t vmin_mv)
                    (SOC_CELL_FULL_MV - SOC_CELL_EMPTY_MV));
 }
 
-static void Soc_UpdateSohDerived(void)
+static void Soc_UpdateLearnedCap(void)
 {
   const int64_t cap_uah = (int64_t)soc_capacity_uah();
 
-  if (!s_status.soh_valid || s_learned_full_uah <= 0LL)
+  if (!s_soc_status.learned_cap_valid || s_learned_full_uah <= 0LL)
   {
-    s_status.soh_percent = 100U;
+    s_soc_status.learned_cap_pct = 100U;
     return;
   }
 
-  s_status.soh_percent = (uint8_t)soc_clamp_i32(
+  s_soc_status.learned_cap_pct = (uint8_t)soc_clamp_i32(
       (int32_t)((s_learned_full_uah * 100LL) / cap_uah), 1, 100);
 }
 
@@ -95,12 +95,12 @@ static void Soc_UpdateDerived(void)
 {
   const int32_t cap_mah = (int32_t)BMS_NOMINAL_CAPACITY_MAH;
 
-  s_status.nominal_mah = cap_mah;
-  s_status.remaining_mah = (int32_t)(s_remaining_uah / 1000LL);
-  s_status.soc_percent = (uint8_t)soc_clamp_i32(
+  s_soc_status.soc_nominal_mah = cap_mah;
+  s_soc_status.soc_remaining_mah = (int32_t)(s_remaining_uah / 1000LL);
+  s_soc_status.soc_percent = (uint8_t)soc_clamp_i32(
       (int32_t)((s_remaining_uah * 100LL) / (int64_t)soc_capacity_uah()),
       0, 100);
-  Soc_UpdateSohDerived();
+  Soc_UpdateLearnedCap();
 }
 
 static bool Soc_IsFullCharge(const bq76942_meas_t *meas)
@@ -114,12 +114,12 @@ static void Soc_BeginChargeSession(int64_t remaining_before_delta)
   s_charge_session_active = true;
   s_charge_session_start_uah = remaining_before_delta;
   s_charge_session_added_uah = 0LL;
-  s_charge_session_start_soc = s_status.soc_percent;
+  s_charge_session_start_soc = s_soc_status.soc_percent;
 }
 
 static void Soc_TrackChargeSession(int64_t delta_uah, const bq76942_meas_t *meas)
 {
-  if (meas->current_ma > SOH_CHARGE_SESSION_MA)
+  if (meas->current_ma > SOC_LEARN_CHARGE_SESSION_MA)
   {
     if (!s_charge_session_active)
     {
@@ -137,13 +137,13 @@ static void Soc_TrackChargeSession(int64_t delta_uah, const bq76942_meas_t *meas
   }
 }
 
-static bool Soc_ChargeSessionCredibleForSoh(void)
+static bool Soc_ChargeSessionCredibleForLearn(void)
 {
   const int64_t cap_uah = (int64_t)soc_capacity_uah();
   const int64_t min_added_uah =
-      (cap_uah * (int64_t)SOH_CHARGE_SESSION_MIN_PCT) / 100LL;
+      (cap_uah * (int64_t)SOC_LEARN_CHARGE_SESSION_MIN_PCT) / 100LL;
 
-  if (s_charge_session_start_soc <= SOH_CHARGE_START_SOC_MAX)
+  if (s_charge_session_start_soc <= SOC_LEARN_CHARGE_START_SOC_MAX)
   {
     return true;
   }
@@ -167,10 +167,10 @@ static void Soc_LearnFullCapacity(int64_t observed_full_uah)
   }
 
   s_learned_full_uah = learned_uah;
-  s_status.soh_valid = true;
+  s_soc_status.learned_cap_valid = true;
 }
 
-static void Soc_TryLearnSohAtFull(const bq76942_meas_t *meas)
+static void Soc_TryLearnCapAtFull(const bq76942_meas_t *meas)
 {
   int64_t observed_uah;
 
@@ -179,7 +179,7 @@ static void Soc_TryLearnSohAtFull(const bq76942_meas_t *meas)
     return;
   }
 
-  if (!s_charge_session_active || !Soc_ChargeSessionCredibleForSoh())
+  if (!s_charge_session_active || !Soc_ChargeSessionCredibleForLearn())
   {
     return;
   }
@@ -199,7 +199,7 @@ static void Soc_SeedFromVoltage(uint16_t vmin_mv)
 
   s_remaining_uah = ((int64_t)Soc_VoltagePercent(vmin_mv) * cap_uah) / 100LL;
   s_inited = true;
-  s_status.valid = true;
+  s_soc_status.soc_valid = true;
   Soc_UpdateDerived();
 }
 /*满电/空电修正剩余容量*/
@@ -236,12 +236,12 @@ static void Soc_ApplyRestCorrection(const bq76942_meas_t *meas)
 
 void Soc_Init(void)
 {
-  s_status.soc_percent = 0U;
-  s_status.valid = false;
-  s_status.remaining_mah = 0;
-  s_status.nominal_mah = (int32_t)BMS_NOMINAL_CAPACITY_MAH;
-  s_status.soh_percent = 100U;
-  s_status.soh_valid = false;
+  s_soc_status.soc_percent = 0U;
+  s_soc_status.soc_valid = false;
+  s_soc_status.soc_remaining_mah = 0;
+  s_soc_status.soc_nominal_mah = (int32_t)BMS_NOMINAL_CAPACITY_MAH;
+  s_soc_status.learned_cap_pct = 100U;
+  s_soc_status.learned_cap_valid = false;
   s_remaining_uah = 0LL;
   s_coulomb_remainder = 0LL;
   s_inited = false;
@@ -261,7 +261,7 @@ void Soc_Process(const bq76942_meas_t *meas, uint32_t period_ms)
 
   if ((meas == NULL) || (!meas->valid) || (period_ms == 0U))
   {
-    s_status.valid = false;
+    s_soc_status.soc_valid = false;
     return;
   }
   /*首次上电，根据静置电压初始化剩余容量*/
@@ -279,35 +279,35 @@ void Soc_Process(const bq76942_meas_t *meas, uint32_t period_ms)
   s_remaining_uah = soc_clamp_i64(s_remaining_uah, 0LL, cap_uah);
   Soc_TrackChargeSession(delta_uah, meas);
   Soc_ApplyRestCorrection(meas);
-  Soc_TryLearnSohAtFull(meas);
+  Soc_TryLearnCapAtFull(meas);
   Soc_ApplyFullEmptyClamp(meas);
   s_remaining_uah = soc_clamp_i64(s_remaining_uah, 0LL, cap_uah);
 
-  s_status.valid = true;
+  s_soc_status.soc_valid = true;
   Soc_UpdateDerived();
 }
 
 const soc_status_t *Soc_GetStatus(void)
 {
-  return &s_status;
+  return &s_soc_status;
 }
 
 uint8_t Soc_GetPercent(void)
 {
-  return s_status.soc_percent;
+  return s_soc_status.soc_percent;
 }
 
 bool Soc_IsValid(void)
 {
-  return s_status.valid;
+  return s_soc_status.soc_valid;
 }
 
-uint8_t Soc_GetSohPercent(void)
+uint8_t Soc_GetLearnedCapPercent(void)
 {
-  return s_status.soh_percent;
+  return s_soc_status.learned_cap_pct;
 }
 
-bool Soc_IsSohValid(void)
+bool Soc_IsLearnedCapValid(void)
 {
-  return s_status.soh_valid;
+  return s_soc_status.learned_cap_valid;
 }

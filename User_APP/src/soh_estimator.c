@@ -31,7 +31,7 @@
 #define SOH_CAP_LEARN_BLEND_NEW              3U
 #define SOH_CAP_LEARN_BLEND_TOTAL           10U
 
-static soh_status_t s_status;
+static soh_status_t s_soh_status;
 static uint32_t s_learned_capacity_mah;
 static uint32_t s_cycle_count;
 static bool s_capacity_valid;
@@ -100,7 +100,7 @@ static uint8_t Soh_EvalConsistencySoh(uint16_t delta_mv, uint16_t weak_lag_mv, b
 
   if (!at_rest)
   {
-    return s_status.consistency_soh != 0U ? s_status.consistency_soh : 100U;
+    return s_soh_status.consistency_soh != 0U ? s_soh_status.consistency_soh : 100U;
   }
 
   imbalance = soh_lerp_penalty_u8(delta_mv, SOH_DELTA_GOOD_MV, SOH_DELTA_BAD_MV, 100U, 40U);
@@ -235,10 +235,10 @@ static void Soh_ApplyLearnedCapacityMah(uint32_t sample_mah)
 
   s_learned_capacity_mah = blended;
   s_capacity_valid = true;
-  s_status.learned_capacity_mah = blended;
-  s_status.capacity_learned = true;
+  s_soh_status.learned_capacity_mah = blended;
+  s_soh_status.capacity_learned = true;
   s_cycle_count++;
-  s_status.cycle_count = s_cycle_count;
+  s_soh_status.cycle_count = s_cycle_count;
 }
 
 static void Soh_FinalizeCapacityLearn(void)
@@ -336,8 +336,8 @@ static void Soh_CapacityLearnProcess(const soh_inputs_t *inputs, uint32_t period
       break;
   }
 
-  s_status.capacity_learn_phase = s_learn_phase;
-  s_status.capacity_learn_accum_mah = (uint32_t)(s_learn_accum_uah / 1000LL);
+  s_soh_status.capacity_learn_phase = s_learn_phase;
+  s_soh_status.capacity_learn_accum_mah = (uint32_t)(s_learn_accum_uah / 1000LL);
   s_prev_charge_state = inputs->charge_state;
 }
 
@@ -366,22 +366,22 @@ static uint32_t Soh_CollectAlarms(const soh_inputs_t *inputs)
 
 void Soh_Init(void)
 {
-  s_status.state = SOH_STATE_UNKNOWN;
-  s_status.soh_percent = 0U;
-  s_status.valid = false;
-  s_status.capacity_soh = 100U;
-  s_status.consistency_soh = 100U;
-  s_status.delta_mv = 0U;
-  s_status.vmin_mv = 0U;
-  s_status.vmax_mv = 0U;
-  s_status.weak_cell_lag_mv = 0U;
-  s_status.chronic_factors = SOH_FACTOR_NONE;
-  s_status.alarm_flags = SOH_ALARM_NONE;
-  s_status.cycle_count = 0U;
-  s_status.learned_capacity_mah = (uint32_t)BMS_NOMINAL_CAPACITY_MAH;
-  s_status.capacity_learn_phase = SOH_CAP_LEARN_IDLE;
-  s_status.capacity_learn_accum_mah = 0U;
-  s_status.capacity_learned = false;
+  s_soh_status.state = SOH_STATE_UNKNOWN;
+  s_soh_status.soh_percent = 0U;
+  s_soh_status.valid = false;
+  s_soh_status.capacity_soh = 100U;
+  s_soh_status.consistency_soh = 100U;
+  s_soh_status.delta_mv = 0U;
+  s_soh_status.vmin_mv = 0U;
+  s_soh_status.vmax_mv = 0U;
+  s_soh_status.weak_cell_lag_mv = 0U;
+  s_soh_status.chronic_factors = SOH_FACTOR_NONE;
+  s_soh_status.alarm_flags = SOH_ALARM_NONE;
+  s_soh_status.cycle_count = 0U;
+  s_soh_status.learned_capacity_mah = (uint32_t)BMS_NOMINAL_CAPACITY_MAH;
+  s_soh_status.capacity_learn_phase = SOH_CAP_LEARN_IDLE;
+  s_soh_status.capacity_learn_accum_mah = 0U;
+  s_soh_status.capacity_learned = false;
 
   s_learned_capacity_mah = (uint32_t)BMS_NOMINAL_CAPACITY_MAH;
   s_cycle_count = 0U;
@@ -399,19 +399,19 @@ void Soh_Process(const soh_inputs_t *inputs, uint32_t period_ms)
 
   if (inputs == NULL)
   {
-    s_status.valid = false;
-    s_status.state = SOH_STATE_UNKNOWN;
+    s_soh_status.valid = false;
+    s_soh_status.state = SOH_STATE_UNKNOWN;
     return;
   }
 
   (void)inputs->temp;
-  s_status.alarm_flags = Soh_CollectAlarms(inputs);
+  s_soh_status.alarm_flags = Soh_CollectAlarms(inputs);
 
   if ((inputs->meas == NULL) || (!inputs->meas->valid) ||
-      ((s_status.alarm_flags & SOH_ALARM_COMM) != 0U))
+      ((s_soh_status.alarm_flags & SOH_ALARM_COMM) != 0U))
   {
-    s_status.valid = false;
-    s_status.state = SOH_STATE_UNKNOWN;
+    s_soh_status.valid = false;
+    s_soh_status.state = SOH_STATE_UNKNOWN;
     return;
   }
 
@@ -419,51 +419,51 @@ void Soh_Process(const soh_inputs_t *inputs, uint32_t period_ms)
 
   Soh_CapacityLearnProcess(inputs, period_ms);
 
-  s_status.vmin_mv = inputs->meas->vcell_min_mv;
-  s_status.vmax_mv = inputs->meas->vcell_max_mv;
-  s_status.delta_mv = (uint16_t)(inputs->meas->vcell_max_mv - inputs->meas->vcell_min_mv);
-  s_status.weak_cell_lag_mv = Soh_ComputeWeakCellLagMv(inputs->meas);
-  s_status.cycle_count = s_cycle_count;
-  s_status.learned_capacity_mah = s_learned_capacity_mah;
+  s_soh_status.vmin_mv = inputs->meas->vcell_min_mv;
+  s_soh_status.vmax_mv = inputs->meas->vcell_max_mv;
+  s_soh_status.delta_mv = (uint16_t)(inputs->meas->vcell_max_mv - inputs->meas->vcell_min_mv);
+  s_soh_status.weak_cell_lag_mv = Soh_ComputeWeakCellLagMv(inputs->meas);
+  s_soh_status.cycle_count = s_cycle_count;
+  s_soh_status.learned_capacity_mah = s_learned_capacity_mah;
 
-  s_status.capacity_soh = Soh_EvalCapacitySoh();
+  s_soh_status.capacity_soh = Soh_EvalCapacitySoh();
   chronic |= SOH_FACTOR_CAPACITY;
 
-  s_status.consistency_soh =
-      Soh_EvalConsistencySoh(s_status.delta_mv, s_status.weak_cell_lag_mv, at_rest);
-  if (s_status.delta_mv > SOH_DELTA_GOOD_MV)
+  s_soh_status.consistency_soh =
+      Soh_EvalConsistencySoh(s_soh_status.delta_mv, s_soh_status.weak_cell_lag_mv, at_rest);
+  if (s_soh_status.delta_mv > SOH_DELTA_GOOD_MV)
   {
     chronic |= SOH_FACTOR_IMBALANCE;
   }
-  if (s_status.weak_cell_lag_mv > 0U)
+  if (s_soh_status.weak_cell_lag_mv > 0U)
   {
     chronic |= SOH_FACTOR_WEAK_CELL;
   }
 
-  s_status.chronic_factors = chronic;
+  s_soh_status.chronic_factors = chronic;
 
   /* SOH = 容量保持率（慢 EMA）；一致性/保护/热告警不参与 */
-  s_status.soh_percent = Soh_ApplyCapEma(s_status.soh_percent, s_status.capacity_soh);
-  s_status.valid = true;
-  s_status.state = Soh_MapState(s_status.soh_percent, true);
+  s_soh_status.soh_percent = Soh_ApplyCapEma(s_soh_status.soh_percent, s_soh_status.capacity_soh);
+  s_soh_status.valid = true;
+  s_soh_status.state = Soh_MapState(s_soh_status.soh_percent, true);
 }
 
 const soh_status_t *Soh_GetStatus(void)
 {
-  return &s_status;
+  return &s_soh_status;
 }
 
 uint8_t Soh_GetPercent(void)
 {
-  return s_status.soh_percent;
+  return s_soh_status.soh_percent;
 }
 
 soh_state_t Soh_GetState(void)
 {
-  return s_status.state;
+  return s_soh_status.state;
 }
 
 bool Soh_IsValid(void)
 {
-  return s_status.valid;
+  return s_soh_status.valid;
 }
