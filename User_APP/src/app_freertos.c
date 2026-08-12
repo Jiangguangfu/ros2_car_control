@@ -35,7 +35,13 @@
 #include "bms_can_ext_tx.h"
 #include "soc_estimator.h"
 #include "soh_estimator.h"
+#include "bms_lin_config.h"
 #include "uart_battery_report.h"
+#include "lin_charger.h"
+#include "lin_driver.h"
+#if BMS_LIN_DIAG_TX_ENABLE
+#include "lin_diag_tx.h"
+#endif
 #include "main.h"
 
 /* USER CODE END Includes */
@@ -48,6 +54,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define BMS_TASK_PERIOD_MS                500U
+#define LIN_CHARGER_PROCESS_MS            100U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -200,14 +207,34 @@ void StartCommonTaskCommon(void *argument)
   (void)argument;
   /* 等 ServiceTask 电源时序完成后再发 CAN */
   osDelay(1500);
+#if BMS_LIN_DIAG_TX_ENABLE
+  LinDiagTx_Init();
+#else
+  LinCharger_Init();
+  LinDriver_Init();
+#endif
 
   for (;;) {
-    BMS_CanTx_Process();
-    BMS_CanExtTx_Process();
-#if (BMS_CAN_DEBUG_ENABLE != 0)
-    BMS_CanDebug_Process();
+    static uint32_t s_can_elapsed_ms;
+
+#if !BMS_LIN_DIAG_TX_ENABLE
+    LinCharger_Process();
 #endif
-    osDelay(BMS_CAN_BATTERY_PERIOD_MS);
+#if BMS_LIN_DIAG_TX_ENABLE
+    LinDiagTx_Poll();
+#endif
+
+    s_can_elapsed_ms += LIN_CHARGER_PROCESS_MS;
+    if (s_can_elapsed_ms >= BMS_CAN_BATTERY_PERIOD_MS) {
+      s_can_elapsed_ms = 0U;
+      BMS_CanTx_Process();
+      BMS_CanExtTx_Process();
+#if (BMS_CAN_DEBUG_ENABLE != 0)
+      BMS_CanDebug_Process();
+#endif
+    }
+
+    osDelay(LIN_CHARGER_PROCESS_MS);
   }
   /* USER CODE END CommTask */
 }

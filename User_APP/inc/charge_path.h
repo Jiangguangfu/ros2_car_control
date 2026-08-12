@@ -36,10 +36,14 @@ void ChargePath_SetProtectInhibit(bool charge_off, bool discharge_off);
 /** Cell voltage protect: COV stop charge, CUV stop discharge. */
 void ChargePath_SetVoltageInhibit(bool charge_off, bool discharge_off);
 
+/** LIN 通信超时：暂停充电路径（不断开 CHG 状态机）。 */
+void ChargePath_SetLinCommInhibit(bool charge_off);
+
 /** Drive CFETOFF/DFETOFF from OR of all requests. */
 void ChargePath_Apply(void);
 
 bool ChargePath_IsImbalanceChargeInhibit(void);
+bool ChargePath_IsLinCommInhibit(void);
 bool ChargePath_IsChargeInhibited(void);
 bool ChargePath_IsDischargeInhibited(void);
 

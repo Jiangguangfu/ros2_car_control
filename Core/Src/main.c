@@ -120,7 +120,6 @@ int main(void)
   MX_FDCAN1_Init();
   MX_TIM2_Init();
   MX_TIM4_Init();
-  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(300);
   (void)HAL_FDCAN_Start(&hfdcan1);
@@ -735,7 +734,11 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_EnableIRQ(EXTI12_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-
+  /* USART1 与 LIN 复用：上电保持 PA9/PA10 浮空，由 lin_driver 接管。 */
+  GPIO_InitStruct.Pin = GPIO_PIN_9 | GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 

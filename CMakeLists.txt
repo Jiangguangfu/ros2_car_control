@@ -61,6 +61,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/charge_path.c
     User_APP/src/charge_manager.c
     User_APP/src/cell_voltage_protect.c
+    User_APP/src/lin_charger.c
+    User_APP/src/lin_driver.c
+    User_APP/src/lin_diag_tx.c
     User_APP/src/soc_estimator.c
     User_APP/src/soh_estimator.c
 )

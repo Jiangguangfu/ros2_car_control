@@ -212,15 +212,9 @@ static void ChargeManager_CheckFaults(I2C_HandleTypeDef *hi2c)
     return;
   }
 
-  if (ChargePath_IsImbalanceChargeInhibit())
-  {
-    /* 压差过大：charge_path 已关 CFET，保持 CHARGING 态等待恢复 */
-    s_status.charge_paused = true;
-  }
-  else
-  {
-    s_status.charge_paused = false;
-  }
+  /* 压差 / LIN 超时：charge_path 已关 CFET，保持 CHARGING 态等待恢复 */
+  s_status.charge_paused =
+      ChargePath_IsImbalanceChargeInhibit() || ChargePath_IsLinCommInhibit();
 }
 
 static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
@@ -236,7 +230,7 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
 
   if (s_status.charge_paused || ChargePath_IsChargeInhibited())
   {
-    /* thermal/imbalance 暂停，不改变 CC/CV 阶段 */
+    /* thermal / 压差 / LIN 超时暂停，不改变 CC/CV 阶段 */
     if ((BSP_PowerRails_GetState() == PWR_STATE_FAULT) ||
         ChargePath_IsImbalanceChargeInhibit())
     {
