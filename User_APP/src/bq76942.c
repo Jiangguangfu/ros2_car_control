@@ -210,6 +210,12 @@ static uint16_t Bq76942_ThresholdCodeToMv(uint8_t code)
   return (uint16_t)((uint16_t)code * 2U);
 }
 
+static uint16_t Bq76942_CellThresholdCodeToMv(uint8_t code)
+{
+  /* TRM: Protections:CUV/COV threshold = code × 50.6 mV. */
+  return (uint16_t)(((uint32_t)code * BQ76942_CELL_THRESHOLD_MV_FACTOR + 5U) / 10U);
+}
+
 static uint16_t Bq76942_ProtDelayMsX10(uint8_t code)
 {
   if (code == 0U)
@@ -246,6 +252,8 @@ bool BQ76942_ReadProtectionConfig(I2C_HandleTypeDef *hi2c,
 {
   uint8_t block[BQ76942_DM_PROT_BLOCK_LEN];
   uint8_t enabled_prot_a = 0U;
+  uint8_t cuv_threshold_code = 0U;
+  uint8_t cov_threshold_code = 0U;
 
   if ((hi2c == NULL) || (out == NULL))
   {
@@ -265,6 +273,18 @@ bool BQ76942_ReadProtectionConfig(I2C_HandleTypeDef *hi2c,
     return false;
   }
 
+  if (!BQ76942_DataMemoryRead(hi2c, BQ76942_DM_CUV_THRESHOLD,
+                              &cuv_threshold_code, 1U))
+  {
+    return false;
+  }
+
+  if (!BQ76942_DataMemoryRead(hi2c, BQ76942_DM_COV_THRESHOLD,
+                              &cov_threshold_code, 1U))
+  {
+    return false;
+  }
+
   if (!BQ76942_DataMemoryRead(hi2c, BQ76942_DM_OCC_THRESHOLD,
                               block, (uint8_t)sizeof(block)))
   {
@@ -276,6 +296,13 @@ bool BQ76942_ReadProtectionConfig(I2C_HandleTypeDef *hi2c,
   out->ocd1_enabled = ((enabled_prot_a & BQ76942_PROT_A_OCD1) != 0U);
   out->ocd2_enabled = ((enabled_prot_a & BQ76942_PROT_A_OCD2) != 0U);
   out->scd_enabled = ((enabled_prot_a & BQ76942_PROT_A_SCD) != 0U);
+  out->cov_enabled = ((enabled_prot_a & BQ76942_PROT_A_COV) != 0U);
+  out->cuv_enabled = ((enabled_prot_a & BQ76942_PROT_A_CUV) != 0U);
+
+  out->cuv_threshold_code = cuv_threshold_code;
+  out->cov_threshold_code = cov_threshold_code;
+  out->cuv_threshold_mv = Bq76942_CellThresholdCodeToMv(cuv_threshold_code);
+  out->cov_threshold_mv = Bq76942_CellThresholdCodeToMv(cov_threshold_code);
 
   out->occ_threshold_code = block[0];
   out->occ_delay_code = block[1];
@@ -470,6 +497,15 @@ static bool BQ76942_WriteTs2Config(I2C_HandleTypeDef *hi2c, uint8_t config)
   return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_TS2_CONFIG, &config, 1U);
 }
 
+static bool BQ76942_WriteVcellMode(I2C_HandleTypeDef *hi2c, uint16_t mode)
+{
+  uint8_t block[2];
+
+  block[0] = (uint8_t)(mode & 0xFFU);
+  block[1] = (uint8_t)((mode >> 8) & 0xFFU);
+  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_VCELL_MODE, block, 2U);
+}
+
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
 {
   float cc_gain;
@@ -496,6 +532,7 @@ bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
 
   ok = BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
   ok = ok && BQ76942_WriteCcGain(hi2c, cc_gain);
+  ok = ok && BQ76942_WriteVcellMode(hi2c, BQ76942_VCELL_MODE);
   ok = ok && BQ76942_WriteProtectionConfig(hi2c);
   ok = ok && BQ76942_WriteTs2Config(hi2c, BQ76942_TS2_CONFIG_REPORT_ONLY);
 

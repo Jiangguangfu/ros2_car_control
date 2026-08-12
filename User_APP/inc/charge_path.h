@@ -33,6 +33,9 @@ void ChargePath_SetChargeManagerInhibit(bool charge_off);
 /** Overcurrent / short-circuit protect manager. */
 void ChargePath_SetProtectInhibit(bool charge_off, bool discharge_off);
 
+/** Cell voltage protect: COV stop charge, CUV stop discharge. */
+void ChargePath_SetVoltageInhibit(bool charge_off, bool discharge_off);
+
 /** Drive CFETOFF/DFETOFF from OR of all requests. */
 void ChargePath_Apply(void);
 

@@ -28,6 +28,7 @@
 #include "cell_balance_manager.h"
 #include "charge_path.h"
 #include "charge_manager.h"
+#include "cell_voltage_protect.h"
 #include "bsp_power_rails.h"
 #include "bms_can_tx.h"
 #include "bms_can_debug.h"
@@ -274,6 +275,7 @@ void StartBmsTask(void *argument)
   osDelay(300);
   ChargePath_Init();
   ChargeManager_Init();
+  CellVoltageProtect_Init();
   Balance_Init();
   Soc_Init();
   Soh_Init();
@@ -313,8 +315,6 @@ void StartBmsTask(void *argument)
     Balance_SetSoc(Soc_GetPercent(), Soc_IsValid());
 
     Balance_Process(&hi2c2);
-    ChargePath_Apply();
-    ChargeManager_Process(&hi2c2);
 
     {
       uint8_t status_a = 0U;
@@ -323,7 +323,11 @@ void StartBmsTask(void *argument)
       bool ok = BQ76942_ReadSafetyStatusEx(&hi2c2, &status_a, &status_b,
                                           &status_c);
       BSP_PowerRails_UpdateBqSafety(status_a, status_b, status_c, ok);
+      CellVoltageProtect_Process(status_a, ok, &s_bq_meas);
     }
+
+    ChargePath_Apply();
+    ChargeManager_Process(&hi2c2);
 
     {
       const pwr_rails_status_t *pwr = BSP_PowerRails_GetStatus();

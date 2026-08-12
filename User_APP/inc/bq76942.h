@@ -75,9 +75,10 @@ extern "C" {
 #define BQ76942_PROT_A_COV                (1U << 3)
 #define BQ76942_PROT_A_CUV                (1U << 2)
 #ifndef BQ76942_ENABLED_PROT_A
-/* 0x88 (SCD+COV) + OCC + OCD1 + OCD2. */
+/* 0x88 (SCD+COV) + OCC + OCD1 + OCD2 + CUV. */
 #define BQ76942_ENABLED_PROT_A            (0x88U | BQ76942_PROT_A_OCC | \
-                                             BQ76942_PROT_A_OCD1 | BQ76942_PROT_A_OCD2)
+                                             BQ76942_PROT_A_OCD1 | BQ76942_PROT_A_OCD2 | \
+                                             BQ76942_PROT_A_CUV)
 #endif
 #ifndef BQ76942_CHG_FET_PROT_A
 #define BQ76942_CHG_FET_PROT_A            0x98U /* OCC+COV+SCD shut CHG FET (TRM default) */
@@ -86,6 +87,11 @@ extern "C" {
 #ifndef BQ76942_DSG_FET_PROT_A
 #define BQ76942_DSG_FET_PROT_A            0xE4U /* SCD+OCD1+OCD2 shut DSG FET (TRM default) */
 #endif
+
+/* Data memory: Protections:CUV/COV (TRM 13.6.1–13.6.2). Threshold U1 in 50.6 mV. */
+#define BQ76942_DM_CUV_THRESHOLD          0x9275U
+#define BQ76942_DM_COV_THRESHOLD          0x9278U
+#define BQ76942_CELL_THRESHOLD_MV_FACTOR  506U  /* 50.6 mV ×10 for integer math */
 
 /* Data memory: Protections:OCC (TRM 13.6.4). Threshold U1 in 2 mV across sense. */
 #define BQ76942_DM_OCC_THRESHOLD          0x9280U
@@ -128,6 +134,12 @@ extern "C" {
 #define BQ76942_DM_Vdiv_OFFSET            0x91B2U
 /* Settings:Configuration:TS2 Config (H1). TRM 13.3.2.13 @ 0x92FE. */
 #define BQ76942_DM_TS2_CONFIG             0x92FEU
+/* Settings:Configuration:Vcell Mode (H2 @ 0x9304). Bit N = Cell(N+1) connected. */
+#define BQ76942_DM_VCELL_MODE             0x9304U
+#ifndef BQ76942_VCELL_MODE
+/* 6S: Cell1..6 (bit0..5); Cell7..10 (bit6..9) unused. */
+#define BQ76942_VCELL_MODE                0x003FU
+#endif
 /*
  * TS2: 18k pullup + 18K thermistor model + report-only (no cell/FET protect).
  * PIN_FXN=3 (thermistor). Same as TS1 0x07 but OPT[1:0]=10 instead of 01.
@@ -183,7 +195,11 @@ typedef struct
   bool ocd1_enabled;
   bool ocd2_enabled;
   bool scd_enabled;
+  bool cov_enabled;
+  bool cuv_enabled;
 
+  uint8_t cuv_threshold_code;
+  uint8_t cov_threshold_code;
   uint8_t occ_threshold_code;
   uint8_t occ_delay_code;
   uint8_t ocd1_threshold_code;
@@ -193,6 +209,8 @@ typedef struct
   uint8_t scd_threshold_code;
   uint8_t scd_delay_code;
 
+  uint16_t cuv_threshold_mv;   /* code × 50.6 mV */
+  uint16_t cov_threshold_mv;   /* code × 50.6 mV */
   uint16_t occ_threshold_mv;
   uint16_t ocd1_threshold_mv;
   uint16_t ocd2_threshold_mv;

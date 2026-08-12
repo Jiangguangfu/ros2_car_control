@@ -13,13 +13,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "stm32u3xx_hal.h"
+#include "bq76942.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define BMS_CELL_COUNT                    6U
-#define BMS_BALANCE_MASK_VALID         0x003FU
+#define BMS_CELL_COUNT                    BQ76942_CELL_COUNT
+#define BMS_BALANCE_MASK_VALID         ((uint16_t)((1U << BMS_CELL_COUNT) - 1U))
 
 #define BALANCE_START_DELTA_MV           40U
 #define BALANCE_STOP_DELTA_MV            15U

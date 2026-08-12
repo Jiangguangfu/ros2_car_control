@@ -9,6 +9,7 @@
 #include "bsp_power_rails.h"
 #include "cell_balance_manager.h"
 #include "charge_manager.h"
+#include "cell_voltage_protect.h"
 
 #include <string.h>
 
@@ -64,6 +65,20 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
     }
     if (meas->vcell_min_mv > 0U && meas->vcell_min_mv <= BALANCE_HARD_MIN_CELL_MV) {
       alarm = (uint32_t)(alarm | BMS_EXT_ALARM_UVP);
+    }
+  }
+
+  if (CellVoltageProtect_IsValid()) {
+    source = (uint8_t)(source | BMS_EXT_SOURCE_PROTECT);
+
+    if (CellVoltageProtect_IsCov()) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_OVP | BMS_EXT_ALARM_BQ_PROTECT);
+    }
+    if (CellVoltageProtect_IsCuv()) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_UVP | BMS_EXT_ALARM_BQ_PROTECT);
+    }
+    if (CellVoltageProtect_IsLowVoltageWarn()) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_LOW_BATTERY);
     }
   }
 

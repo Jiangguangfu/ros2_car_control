@@ -13,6 +13,8 @@ extern "C" {
 
 #include <stdint.h>
 
+#include "bq76942.h"
+
 /** 告警 severity */
 #define BMS_EXT_SEVERITY_NONE     0u
 #define BMS_EXT_SEVERITY_WARN     1u
@@ -38,6 +40,7 @@ extern "C" {
 #define BMS_EXT_ALARM_DSG_INHIBIT      (1u << 9)
 #define BMS_EXT_ALARM_CHARGE_FAULT     (1u << 10)
 #define BMS_EXT_ALARM_SHORT_CIRCUIT    (1u << 11)
+#define BMS_EXT_ALARM_LOW_BATTERY      (1u << 12)
 
 typedef struct __attribute__((packed)) {
   uint32_t alarm_flags;
@@ -50,7 +53,7 @@ typedef struct __attribute__((packed)) {
   int16_t  current_cc3_ma;
   int16_t  ts1_c_x10;
   int16_t  ts2_c_x10;
-  uint16_t cell_mv[6];
+  uint16_t cell_mv[BQ76942_CELL_COUNT];
 } uart_battery_ext_report_t;
 
 #ifdef __cplusplus
