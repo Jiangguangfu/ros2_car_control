@@ -25,6 +25,8 @@
 #include "bms_can_tx.h"
 #include "bms_can_ext_tx.h"
 #include "bsp_power_rails.h"
+#include "bms_lin_config.h"
+#include "lin_driver.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -128,6 +130,10 @@ int main(void)
                                      FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
   BMS_CanTx_Init();
   BMS_CanExtTx_Init();
+#if !BMS_LIN_DIAG_TX_ENABLE
+  /* 12V 已在 BootSequence 打开；尽早监听 LIN Break，避免 CommTask 1.5s 空窗丢帧。 */
+  LinDriver_Init();
+#endif
   /* USER CODE END 2 */
 
   /* Init scheduler */

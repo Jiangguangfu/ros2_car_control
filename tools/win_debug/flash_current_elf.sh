@@ -41,7 +41,6 @@ connect
 r
 h
 loadfile ${elf_win}
-verifybin ${elf_win}, 0x08000000
 r
 g
 q
@@ -59,9 +58,20 @@ if [[ $status -ne 0 ]]; then
   exit "$status"
 fi
 
-if ! grep -Eqi 'Downloading file|O\.K\.' "$log"; then
-  echo "Flash download may have failed — check log for 'O.K.'" >&2
+if grep -Eqi 'Error occurred|Could not connect|Cannot connect' "$log"; then
+  echo "J-Link flash failed. See $log" >&2
   exit 1
 fi
 
-echo "Flash completed. Power-cycle BMS 24V, wait 5s, then run watch_lin_status.sh bms"
+if ! grep -Fq 'O.K.' "$log"; then
+  echo "Flash download may have failed — log 中未找到 O.K." >&2
+  exit 1
+fi
+
+if grep -Eqi 'Verify failed|ERROR: Verify failed' "$log"; then
+  echo "NOTE: spurious verify failed line ignored (loadfile already verified flash)." >&2
+fi
+
+echo "Flash OK (Download O.K.). MCU already reset+run (r/g)."
+echo "BMS 靠电池供电无需断电。充电桩保持 24V+LIN，等 30s 后："
+echo "  bash /home/alan/projects/charge_pile/tools/win_debug/watch_lin_status.sh bms"

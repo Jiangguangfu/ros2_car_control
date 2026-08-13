@@ -205,19 +205,21 @@ void StartCommonTaskCommon(void *argument)
 {
   /* USER CODE BEGIN CommTask */
   (void)argument;
-  /* 等 ServiceTask 电源时序完成后再发 CAN */
+  /* BootSequence 已在 main 里开 12V；LIN 驱动也在 main 里尽早 Init。 */
+#if !BMS_LIN_DIAG_TX_ENABLE
+  LinCharger_Init();
+  LinDriver_Init();
+#endif
   osDelay(1500);
 #if BMS_LIN_DIAG_TX_ENABLE
   LinDiagTx_Init();
-#else
-  LinCharger_Init();
-  LinDriver_Init();
 #endif
 
   for (;;) {
     static uint32_t s_can_elapsed_ms;
 
 #if !BMS_LIN_DIAG_TX_ENABLE
+    LinDriver_Poll();
     LinCharger_Process();
 #endif
 #if BMS_LIN_DIAG_TX_ENABLE
