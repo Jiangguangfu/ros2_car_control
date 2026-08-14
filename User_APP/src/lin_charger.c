@@ -371,6 +371,7 @@ void LinCharger_Process(void)
   {
     s_lin.comm_lost = true;
     ChargePath_SetLinCommInhibit(true);
+    ChargePath_Apply();
   }
 }
 
@@ -395,23 +396,34 @@ bool LinCharger_OnMasterFrame(uint8_t pid, const uint8_t *data, uint8_t len,
   switch (pid & 0x3Fu)
   {
     case LIN_PID_CMD_HANDSHAKE:
-      lin_touch_master(now_ms);
       has_rsp = lin_handle_handshake(data, len, rsp, rsp_len);
+      if (has_rsp)
+      {
+        lin_touch_master(now_ms);
+      }
       break;
 
     case LIN_PID_CMD_VI_REQUEST:
-      lin_touch_master(now_ms);
       has_rsp = lin_handle_vi_request(data, len, rsp, rsp_len);
+      if (has_rsp)
+      {
+        lin_touch_master(now_ms);
+      }
       break;
 
     case LIN_PID_CMD_CHARGE_CTRL:
-      lin_touch_master(now_ms);
-      (void)lin_handle_charge_ctrl(data, len);
+      if (lin_handle_charge_ctrl(data, len))
+      {
+        lin_touch_master(now_ms);
+      }
       break;
 
     case LIN_PID_CMD_STATUS_POLL:
-      lin_touch_master(now_ms);
       has_rsp = lin_handle_status_poll(rsp, rsp_len);
+      if (has_rsp)
+      {
+        lin_touch_master(now_ms);
+      }
       break;
 
     case LIN_PID_CMD_HEARTBEAT:
