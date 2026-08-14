@@ -73,7 +73,7 @@ typedef struct
 
 void ChargeManager_Init(void);
 
-/** 请求启动充电；仅在 IDLE/COMPLETED(需电压回落) 时成功。 */
+/** 请求启动充电；IDLE/COMPLETED(需电压回落)；可恢复 FAULT 会先清再启。 */
 bool ChargeManager_Start(void);
 
 /** 用户停止充电，回到 IDLE。 */
@@ -81,6 +81,9 @@ void ChargeManager_Stop(void);
 
 /** 清除可恢复异常后回到 IDLE（需温度/通信/保护已恢复）。 */
 bool ChargeManager_ClearFault(void);
+
+/** LIN 会话 ACTIVE 时电流由充电桩提供，不要因尚未出流报 NO_CURRENT。 */
+void ChargeManager_SetLinChargeExpect(bool expect);
 
 /** 周期处理：采样、CC/CV 判定、FET/CFETOFF 执行。 */
 void ChargeManager_Process(I2C_HandleTypeDef *hi2c);

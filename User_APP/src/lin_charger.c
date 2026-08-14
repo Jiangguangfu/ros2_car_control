@@ -26,6 +26,12 @@ typedef struct
 
 static lin_charger_ctx_t s_lin;
 
+static void lin_set_session(lin_session_state_t session)
+{
+  s_lin.session = session;
+  ChargeManager_SetLinChargeExpect(session == LIN_SESSION_ACTIVE);
+}
+
 static void lin_touch_master(uint32_t now_ms)
 {
   s_lin.last_master_ms = now_ms;
@@ -170,7 +176,12 @@ static bool lin_handle_handshake(const uint8_t *data, uint8_t len,
     return false;
   }
 
-  s_lin.session = LIN_SESSION_HANDSHAKED;
+  if (ChargeManager_GetState() == CHARGE_STATE_FAULT)
+  {
+    (void)ChargeManager_ClearFault();
+  }
+
+  lin_set_session(LIN_SESSION_HANDSHAKED);
 
   rsp_pkt.msg_type = LIN_MSG_HANDSHAKE_RSP;
   rsp_pkt.proto_ver = LIN_PROTO_VER;
@@ -215,6 +226,11 @@ static bool lin_handle_vi_request(const uint8_t *data, uint8_t len,
 
   if (ChargeManager_GetState() == CHARGE_STATE_FAULT)
   {
+    (void)ChargeManager_ClearFault();
+  }
+
+  if (ChargeManager_GetState() == CHARGE_STATE_FAULT)
+  {
     rsp_pkt.result = LIN_VI_RESULT_FAULT;
     rsp_pkt.v_allow_mv = 0U;
     rsp_pkt.i_allow_ma = 0U;
@@ -242,14 +258,14 @@ static bool lin_handle_vi_request(const uint8_t *data, uint8_t len,
 
   s_lin.v_allow_mv = rsp_pkt.v_allow_mv;
   s_lin.i_allow_ma = rsp_pkt.i_allow_ma;
-  s_lin.session = LIN_SESSION_VI_OK;
+  lin_set_session(LIN_SESSION_VI_OK);
 
   if ((req->flags & LIN_VI_FLAG_REQUEST_START) != 0U)
   {
     (void)ChargeManager_Start();
     if (ChargeManager_GetState() == CHARGE_STATE_CHARGING)
     {
-      s_lin.session = LIN_SESSION_ACTIVE;
+      lin_set_session(LIN_SESSION_ACTIVE);
     }
   }
 
@@ -278,13 +294,13 @@ static bool lin_handle_charge_ctrl(const uint8_t *data, uint8_t len)
   {
     if (ChargeManager_Start())
     {
-      s_lin.session = LIN_SESSION_ACTIVE;
+      lin_set_session(LIN_SESSION_ACTIVE);
     }
   }
   else if (req->cmd == LIN_CHARGE_CTRL_STOP)
   {
     ChargeManager_Stop();
-    s_lin.session = LIN_SESSION_VI_OK;
+    lin_set_session(LIN_SESSION_VI_OK);
   }
 
   return true;
@@ -317,7 +333,7 @@ void LinCharger_Init(void)
     return;
   }
 
-  s_lin.session = LIN_SESSION_IDLE;
+  lin_set_session(LIN_SESSION_IDLE);
   s_lin.comm_lost = false;
   s_lin.v_allow_mv = LIN_PACK_VMAX_MV;
   s_lin.i_allow_ma = LIN_IMAX_DEFAULT_MA;

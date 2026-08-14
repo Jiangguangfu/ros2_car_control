@@ -26,7 +26,7 @@
 #define CHARGE_CV_TIMEOUT_MS          (3600000U) /* CV 阶段最长 1 h */
 #define CHARGE_MAX_CURRENT_MA             3000   /* 过流保护 */
 #define CHARGE_COMM_FAIL_THRESHOLD           3U
-#define CHARGE_START_DEBOUNCE                2U  /* 启动后等待电流 */
+#define CHARGE_START_DEBOUNCE               20U  /* ~10 s @ 500 ms；给 LIN 桩出流时间 */
 
 #define CHARGE_TICK_MS                     500U
 
@@ -34,6 +34,7 @@ static charge_status_t s_status;
 static uint32_t s_phase_enter_ms;
 static uint8_t s_start_debounce;
 static bool s_inited;
+static bool s_lin_charge_expect;
 
 static void ChargeManager_SetFault(charge_fault_reason_t reason)
 {
@@ -257,7 +258,9 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
     }
     else if (s_start_debounce >= CHARGE_START_DEBOUNCE)
     {
-      if (s_status.pack_current_ma < CHARGE_CC_DETECT_CURRENT_MA)
+      /* LIN 桩在 BMS 报 CHARGING 之后才启动 BQ25756，不能按实验室电源立刻判无流。 */
+      if ((!s_lin_charge_expect) &&
+          (s_status.pack_current_ma < CHARGE_CC_DETECT_CURRENT_MA))
       {
         ChargeManager_SetFault(CHARGE_FAULT_NO_CURRENT);
         return;
@@ -308,6 +311,11 @@ void ChargeManager_Init(void)
   s_inited = true;
 }
 
+void ChargeManager_SetLinChargeExpect(bool expect)
+{
+  s_lin_charge_expect = expect;
+}
+
 bool ChargeManager_Start(void)
 {
   if (s_status.state == CHARGE_STATE_CHARGING)
@@ -317,7 +325,10 @@ bool ChargeManager_Start(void)
 
   if (s_status.state == CHARGE_STATE_FAULT)
   {
-    return false;
+    if (!ChargeManager_ClearFault())
+    {
+      return false;
+    }
   }
 
   if (s_status.state == CHARGE_STATE_COMPLETED)
