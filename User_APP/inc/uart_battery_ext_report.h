@@ -41,6 +41,8 @@ extern "C" {
 #define BMS_EXT_ALARM_CHARGE_FAULT     (1u << 10)
 #define BMS_EXT_ALARM_SHORT_CIRCUIT    (1u << 11)
 #define BMS_EXT_ALARM_LOW_BATTERY      (1u << 12)
+#define BMS_EXT_ALARM_BALANCING        (1u << 13)
+#define BMS_EXT_ALARM_DELTA_HIGH       (1u << 14)
 
 typedef struct __attribute__((packed)) {
   uint32_t alarm_flags;

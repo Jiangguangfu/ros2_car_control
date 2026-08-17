@@ -24,6 +24,7 @@ BMS 无对外 UART，电池数据经 **CAN** 上报底盘（500 kbit/s，FDCAN P
 |--------|------|------|
 | **0x48B** | 电池状态（电压、电流、SOC、温度） | 5 Hz |
 | **0x49A** | 告警 + 扩展（单体电压、双温、双电流等） | 1 Hz |
+| **0x49B** | 均衡状态（阶段、压差、泄放掩码） | 1 Hz |
 
 协议与 payload 布局详见 **[docs/BMS_CAN.md](docs/BMS_CAN.md)**。
 
@@ -32,7 +33,7 @@ BMS 无对外 UART，电池数据经 **CAN** 上报底盘（500 kbit/s，FDCAN P
 ## 软件架构
 
 ```
-CommTask          — CAN 上报（0x48B / 0x49A，5 Hz 调度）
+CommTask          — CAN 上报（0x48B / 0x49A / 0x49B，5 Hz 调度）+ 均衡 RTT
 ServiceTask       — 空闲占位（上电时序在 main）
 PowerTask         — bsp_power_rails（200 ms：热 + 过流/短路 + 多电源/风扇）
 BmsTask           — BQ76942 采样 + Safety A/B/C + 均衡/充电/SOC/SOH（500 ms）
@@ -74,7 +75,7 @@ BmsTask 读 Safety Status A/B/C 原始字节后调用 `BSP_PowerRails_UpdateBqSa
 
 - 被动均衡：BQ76942 `CB_ACTIVE_CELLS`（Cell1~6，掩码 `0x003F`）
 - 均衡策略：充电顶部细均衡 + 中段最高芯保护 / 真伪鉴别
-- 状态监控：`Balance_GetStatus()`
+- 状态监控：`Balance_GetStatus()` → CAN **0x49B**、LIN PID **0x33**、RTT；0x49A 告警位 `BALANCING` / `DELTA_HIGH`
 - 开/关：`Balance_SetEnabled()`
 
 ### 设计原则
@@ -295,7 +296,7 @@ const balance_status_t *Balance_GetStatus(void);
 | 阶段 | 内容 |
 |------|------|
 | P1 | `Balance_SetChargerPresent()` 接硬件；Battery Status 解析 |
-| P2 | `Balance_SetSoc()` 接 SOC 算法；CommTask 状态上报 |
+| P2 | `Balance_SetSoc()` 接 SOC 算法（已接）；CommTask 均衡上报（0x49B，已接） |
 
 未调用 `Balance_SetChargerPresent()` 时，默认以 `chg_fet_on` 推断充电器在。  
 未调用 `Balance_SetSoc(..., true)` 时，使用 vmin 3900/3850 mV 回退判据。
@@ -304,14 +305,16 @@ const balance_status_t *Balance_GetStatus(void);
 
 ```
 docs/
-  BMS_CAN.md              — CAN 协议说明（0x48B / 0x49A）
+  BMS_CAN.md              — CAN 协议说明（0x48B / 0x49A / 0x49B）
 User_APP/
   inc/
     can_uart_transport.h
     uart_battery_report.h
     uart_battery_ext_report.h
+    uart_battery_balance_report.h
     bms_can_tx.h
     bms_can_ext_tx.h
+    bms_can_balance_tx.h
     bq76942.h
     bsp_power_rails.h
     cell_balance_manager.h
@@ -321,8 +324,10 @@ User_APP/
   src/
     bms_can_tx.c
     bms_can_ext_tx.c
+    bms_can_balance_tx.c
     bms_data_snapshot.c
     bms_ext_snapshot.c
+    bms_balance_snapshot.c
     bq76942.c
     bsp_power_rails.c
     cell_balance_manager.c

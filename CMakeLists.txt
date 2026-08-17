@@ -39,6 +39,8 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+set(SEGGER_RTT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/SEGGER_RTT")
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -50,8 +52,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/soft_start.c
     User_APP/src/bms_can_tx.c
     User_APP/src/bms_can_ext_tx.c
+    User_APP/src/bms_can_balance_tx.c
     User_APP/src/bms_data_snapshot.c
     User_APP/src/bms_ext_snapshot.c
+    User_APP/src/bms_balance_snapshot.c
+    User_APP/src/bms_balance_rtt.c
     User_APP/src/bms_can_debug.c
     User_APP/src/bsp_buzzer.c
     User_APP/src/bsp_ws2812.c
@@ -67,11 +72,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/lin_diag_tx.c
     User_APP/src/soc_estimator.c
     User_APP/src/soh_estimator.c
+    "${SEGGER_RTT_DIR}/SEGGER_RTT.c"
+    "${SEGGER_RTT_DIR}/SEGGER_RTT_printf.c"
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/inc
+    "${SEGGER_RTT_DIR}"
 )
 
 # Add project symbols (macros)

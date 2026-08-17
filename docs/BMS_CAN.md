@@ -32,6 +32,7 @@ BMS（STM32U385）通过 **FDCAN1** 向底盘主控上报电池数据。本板 *
 |-----------|--------|---------|--------|------|------|
 | `0x8B` | **0x48B** | 20 B | **4** | **5 Hz**（200 ms） | 电池状态（主包） |
 | `0x9A` | **0x49A** | 32 B | **6** | **1 Hz** + 告警变化即发 | 告警 + 扩展测量 |
+| `0x9B` | **0x49B** | 8 B | **2** | **1 Hz** + state/mask 变化即发 | 均衡状态监控 |
 | — | 0x48C–0x48F | 8 B × 4 | 1 帧/ID | 5 Hz | **仅联调**（`BMS_CAN_DEBUG=ON`） |
 
 > **注意**：`0x48C`–`0x48F` 为调试帧，与 TYPE `0x8C` 路由规则无关；**量产固件默认关闭**。
@@ -121,12 +122,70 @@ Byte 2–7 payload 连续 6 字节
 | 8 | `BMS_EXT_ALARM_CHG_INHIBIT` | 充电禁止 |
 | 9 | `BMS_EXT_ALARM_DSG_INHIBIT` | 放电禁止 |
 | 10 | `BMS_EXT_ALARM_CHARGE_FAULT` | 充电状态机故障 |
+| 13 | `BMS_EXT_ALARM_BALANCING` | 正在泄放（`ACTIVE` 或 `MID_PROTECT`），不抬升 severity |
+| 14 | `BMS_EXT_ALARM_DELTA_HIGH` | 顶部窗口且 Δ > 15 mV（中段不置位） |
 
-**severity**：有关键告警（BQ 保护、充电故障、过温）时为 **CRITICAL(2)**，其余为 **WARN(1)**。
+**severity**：有关键告警（BQ 保护、充电故障、过温）时为 **CRITICAL(2)**，其余为 **WARN(1)**。`BALANCING` 单独置位不改变 severity。
+
+明细（阶段、掩码、压差）见 **0x49B**，本帧不扩长度。
 
 **数据来源**：`BmsExtSnapshot_Fill()` ← BQ + 热管理 + 充电 + 均衡 + BQ Safety。
 
 **发送**：`BMS_CanExtTx_Process()`；周期 **1000 ms**，`alarm_flags` 变化时 **立即重发**。
+
+---
+
+## 0x49B — REPORT_BATTERY_BALANCE（TYPE 0x9B）
+
+**用途**：均衡状态监控。不把内部 `balance_status_t` 整包上总线。
+
+压差 `delta_mv` 始终是 `vmax − vmin`，**不分阶段**；阶段用 `state` + `flags.TOP_WINDOW` 区分：
+
+| `state` | 阶段 |
+|---------|------|
+| `ACTIVE` (3) | 即将充满：顶部细均衡 |
+| `MID_RELAX` (5) | 中段：停充松弛鉴别 |
+| `MID_PROTECT` (6) | 中段：泄最高芯 |
+| 其它 | 未均衡（看 `inhibit_reason`） |
+
+`delta_ok`（Δ ≤ 15 mV）只对顶部验收有意义；中段即使策略正常也常为 0。
+
+**结构体**：`uart_battery_balance_report_t`（`uart_battery_balance_report.h`），8 B。
+
+| 偏移 | 字段 | 类型 | 说明 |
+|------|------|------|------|
+| 0 | `flags` | uint8 | 见下表 |
+| 1 | `state` | uint8 | `balance_state_t` |
+| 2 | `inhibit_reason` | uint8 | `balance_inhibit_reason_t` |
+| 3 | `mid_class` | uint8 | `balance_mid_class_t`（非中段为 0） |
+| 4–5 | `delta_mv` | uint16 | 当前压差 mV（LE） |
+| 6–7 | `active_mask` | uint16 | Cell1~6 泄放掩码（LE，`0x003F`） |
+
+### `flags`
+
+| 位 | 宏 | 含义 |
+|----|-----|------|
+| 0 | `BMS_BAL_FLAG_ENABLED` | 用户总开关开 |
+| 1 | `BMS_BAL_FLAG_DELTA_OK` | Δ ≤ 15 mV |
+| 2 | `BMS_BAL_FLAG_IMBALANCE_CHG` | 压差/中段停充 |
+| 3 | `BMS_BAL_FLAG_TOP_WINDOW` | 即将充满窗口（SOC≥90% 或 vmin≥3900，或已在 ACTIVE） |
+| 4 | `BMS_BAL_FLAG_BLEEDING` | 正在泄放（`ACTIVE` 或 `MID_PROTECT`） |
+
+**数据来源**：`BmsBalanceSnapshot_Fill()` ← `Balance_GetStatus()`。
+
+**发送**：`BMS_CanBalanceTx_Process()`；周期 **1000 ms**，`state` 或 `active_mask` 变化时 **立即重发**。不因 `delta_mv` 抖动连发。
+
+同一快照还走：
+
+| 通道 | 方式 |
+|------|------|
+| CAN `0x49B` | 周期 + 变化即发 |
+| LIN PID **0x33** | Master 轮询，Slave 应答 8 B（握手后） |
+| RTT | `BmsBalanceRtt_Process()`，周期与变化同 CAN；J-Link RTT Viewer |
+
+LIN 应答布局与上表完全相同（无分片、无 `msg_type`）。充电桩需调度 PID `0x33` 才会出帧。
+
+RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 
 ---
 
@@ -152,14 +211,19 @@ Byte 2–7 payload 连续 6 字节
 | 传输常量 | `User_APP/inc/can_uart_transport.h` | CAN ID、分片长度 |
 | 0x8B 结构 | `User_APP/inc/uart_battery_report.h` | payload 定义 |
 | 0x9A 结构 | `User_APP/inc/uart_battery_ext_report.h` | 扩展 payload、告警宏 |
+| 0x9B 结构 | `User_APP/inc/uart_battery_balance_report.h` | 均衡监控 payload |
 | 主包快照 | `User_APP/src/bms_data_snapshot.c` | BQ → 0x8B |
 | 扩展快照 | `User_APP/src/bms_ext_snapshot.c` | 告警 + 扩展 → 0x9A |
+| 均衡快照 | `User_APP/src/bms_balance_snapshot.c` | `Balance_GetStatus()` → 0x9B |
 | CAN 发送 | `User_APP/src/bms_can_tx.c` | 0x48B |
 | CAN 扩展发送 | `User_APP/src/bms_can_ext_tx.c` | 0x49A |
+| CAN 均衡发送 | `User_APP/src/bms_can_balance_tx.c` | 0x49B |
+| 均衡 RTT | `User_APP/src/bms_balance_rtt.c` | J-Link RTT 文本 |
+| LIN 充电/均衡 | `User_APP/src/lin_charger.c` | PID 0x32 充电状态；**0x33** 均衡 8 B |
 | 调试发送 | `User_APP/src/bms_can_debug.c` | 0x48C–0x48F |
 | 任务 | `User_APP/src/app_freertos.c` | `CommTask` 调用发送 |
 
-初始化：`main.c` 中 `BMS_CanTx_Init()`、`BMS_CanExtTx_Init()`；FDCAN 启动后 `CommTask` 延迟 1.5 s 再发（等电源时序）。
+初始化：`main.c` 中 `BMS_CanTx_Init()`、`BMS_CanExtTx_Init()`、`BMS_CanBalanceTx_Init()`；FDCAN 启动后 `CommTask` 延迟 1.5 s 再发（等电源时序）。
 
 ---
 
@@ -169,7 +233,8 @@ Byte 2–7 payload 连续 6 字节
 |------|------|
 | 接收 0x48B / TYPE 0x8B | 已有（`PawDrive-Base-Controller`） |
 | 接收 0x49A / TYPE 0x9A | **待同步**（`uart_protocol.h`、`bms_can_task.c`） |
-| 文档 | 底盘 `docs/BMS_CAN.md` 需补充 0x49A |
+| 接收 0x49B / TYPE 0x9B | **待同步**（均衡监控） |
+| 文档 | 底盘 `docs/BMS_CAN.md` 需补充 0x49A / 0x49B |
 
 ---
 
@@ -179,7 +244,8 @@ Byte 2–7 payload 连续 6 字节
 
 1. **0x48B**：每 200 ms 连续 **4** 帧，`frag_total = 04`。
 2. **0x49A**：约每 1 s **6** 帧，`frag_total = 06`；告警变化时额外 burst。
-3. 量产固件不应出现 **0x48C**–**0x48F**（除非开启 `BMS_CAN_DEBUG`）。
+3. **0x49B**：约每 1 s **2** 帧，`frag_total = 02`；`state` / `active_mask` 变化时额外 burst。
+4. 量产固件不应出现 **0x48C**–**0x48F**（除非开启 `BMS_CAN_DEBUG`）。
 
 解码示例（0x48B 电压）：重组后 offset 4–7 为 float LE，如 `33 33 C1 41` ≈ 24.15 V。
 
@@ -189,6 +255,7 @@ Byte 2–7 payload 连续 6 字节
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v0.4 | 2026-08 | 新增 **0x49B**（TYPE 0x9B）均衡监控；LIN PID 0x33；RTT 打印；0x49A 增加 BALANCING / DELTA_HIGH |
 | v0.3 | 2026-03 | 新增 **0x49A**（TYPE 0x9A）告警与扩展测量；BMS 文档初版 |
 | v0.2 | — | 弃用自定义 0x180/0x181，改为 UART 0x8B 分片 → 0x48B |
 | v0.1 | — | （已废弃）自定义 CAN 应用协议 |

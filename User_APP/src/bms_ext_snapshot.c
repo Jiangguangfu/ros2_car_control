@@ -163,6 +163,15 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
     if (balance->imbalance_charge_inhibit) {
       alarm = (uint32_t)(alarm | BMS_EXT_ALARM_IMBALANCE_CHG);
     }
+    if ((balance->state == BALANCE_STATE_ACTIVE) ||
+        (balance->state == BALANCE_STATE_MID_PROTECT)) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_BALANCING);
+    }
+    if (!balance->delta_ok &&
+        (balance->top_start_ready ||
+         (balance->state == BALANCE_STATE_ACTIVE))) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_DELTA_HIGH);
+    }
   }
 
   if (Bms_GetBqMeasFailCount() >= BMS_EXT_COMM_FAIL_THRESHOLD ||
@@ -171,15 +180,19 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
     alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COMM_FAIL);
   }
 
-  if (alarm != 0U) {
-    if ((alarm & (BMS_EXT_ALARM_BQ_PROTECT |
-                  BMS_EXT_ALARM_CHARGE_FAULT |
-                  BMS_EXT_ALARM_OVERTEMP |
-                  BMS_EXT_ALARM_SHORT_CIRCUIT |
-                  BMS_EXT_ALARM_OCP)) != 0U) {
-      severity = BMS_EXT_SEVERITY_CRITICAL;
-    } else {
-      severity = BMS_EXT_SEVERITY_WARN;
+  {
+    uint32_t sev_alarms = (uint32_t)(alarm & ~BMS_EXT_ALARM_BALANCING);
+
+    if (sev_alarms != 0U) {
+      if ((sev_alarms & (BMS_EXT_ALARM_BQ_PROTECT |
+                         BMS_EXT_ALARM_CHARGE_FAULT |
+                         BMS_EXT_ALARM_OVERTEMP |
+                         BMS_EXT_ALARM_SHORT_CIRCUIT |
+                         BMS_EXT_ALARM_OCP)) != 0U) {
+        severity = BMS_EXT_SEVERITY_CRITICAL;
+      } else {
+        severity = BMS_EXT_SEVERITY_WARN;
+      }
     }
   }
 

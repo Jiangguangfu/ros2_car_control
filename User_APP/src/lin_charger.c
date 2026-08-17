@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "app_freertos.h"
+#include "bms_balance_snapshot.h"
 #include "bsp_power_rails.h"
 #include "charge_manager.h"
 #include "charge_path.h"
@@ -326,6 +327,22 @@ static bool lin_handle_status_poll(uint8_t *rsp, uint8_t *rsp_len)
   return true;
 }
 
+static bool lin_handle_balance_poll(uint8_t *rsp, uint8_t *rsp_len)
+{
+  uart_battery_balance_report_t report;
+
+  if ((rsp == NULL) || (rsp_len == NULL) ||
+      (s_lin.session < LIN_SESSION_HANDSHAKED))
+  {
+    return false;
+  }
+
+  BmsBalanceSnapshot_Fill(&report);
+  (void)memcpy(rsp, &report, sizeof(report));
+  *rsp_len = (uint8_t)sizeof(report);
+  return true;
+}
+
 void LinCharger_Init(void)
 {
   if (s_lin.inited)
@@ -420,6 +437,14 @@ bool LinCharger_OnMasterFrame(uint8_t pid, const uint8_t *data, uint8_t len,
 
     case LIN_PID_CMD_STATUS_POLL:
       has_rsp = lin_handle_status_poll(rsp, rsp_len);
+      if (has_rsp)
+      {
+        lin_touch_master(now_ms);
+      }
+      break;
+
+    case LIN_PID_CMD_BALANCE_POLL:
+      has_rsp = lin_handle_balance_poll(rsp, rsp_len);
       if (has_rsp)
       {
         lin_touch_master(now_ms);

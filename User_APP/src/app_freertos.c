@@ -33,6 +33,8 @@
 #include "bms_can_tx.h"
 #include "bms_can_debug.h"
 #include "bms_can_ext_tx.h"
+#include "bms_can_balance_tx.h"
+#include "bms_balance_rtt.h"
 #include "soc_estimator.h"
 #include "soh_estimator.h"
 #include "bms_lin_config.h"
@@ -237,6 +239,8 @@ void StartCommonTaskCommon(void *argument)
       s_can_elapsed_ms = 0U;
       BMS_CanTx_Process();
       BMS_CanExtTx_Process();
+      BMS_CanBalanceTx_Process();
+      BmsBalanceRtt_Process();
 #if (BMS_CAN_DEBUG_ENABLE != 0)
       BMS_CanDebug_Process();
 #endif

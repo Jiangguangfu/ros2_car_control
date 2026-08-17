@@ -39,6 +39,8 @@ extern "C" {
 #define LIN_PID_CMD_CHARGE_CTRL         0x30u
 #define LIN_PID_RSP_CHARGE_STATUS       0x31u
 #define LIN_PID_CMD_STATUS_POLL         0x32u
+/** Master 轮询均衡监控；BMS 应答 8 B，布局同 CAN 0x49B。 */
+#define LIN_PID_CMD_BALANCE_POLL        0x33u
 /** LIN 仅 6-bit ID；心跳使用 ID 63（0x3F），不可用 0xF0。 */
 #define LIN_PID_CMD_HEARTBEAT           0x3Fu
 
