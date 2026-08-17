@@ -5,7 +5,7 @@
  *
  * Schematic (BQ76942PBR):
  *   TS1 — NTC (protect); TS2 — NTC (report only); TS3 — SW2
- *   PC13 PWR_24V_BYPASS_EN + BQ_DFETOFF low + FET_ENABLE + ALL_FETS_ON → 24V out
+ *   PC13 PWR_24V_BYPASS_EN 本项目不用，始终关闭；BQ_DFETOFF / FET 由 charge_path 管理
  ******************************************************************************
  */
 #ifndef BQ76942_H
@@ -29,6 +29,7 @@ extern "C" {
 #define BQ76942_CMD_CELL1_VOLTAGE         0x14U
 #define BQ76942_CMD_STACK_VOLTAGE         0x34U
 #define BQ76942_CMD_PACK_VOLTAGE          0x36U
+#define BQ76942_CMD_LD_VOLTAGE            0x38U
 #define BQ76942_CMD_CC2_CURRENT           0x3AU
 #define BQ76942_CMD_CB_ACTIVE_CELLS       0x83U
 #define BQ76942_CMD_FET_STATUS            0x7FU
@@ -50,6 +51,8 @@ extern "C" {
 #define BQ76942_SUBCMD_FET_ENABLE         0x0022U /* toggle Manufacturing[FET_EN] */
 #define BQ76942_SUBCMD_ALL_FETS_ON        0x0096U
 #define BQ76942_SUBCMD_ALL_FETS_OFF       0x0095U
+#define BQ76942_SUBCMD_DSG_PDSG_OFF       0x0093U
+#define BQ76942_SUBCMD_FET_CONTROL        0x0097U
 #define BQ76942_SUBCMD_MFG_STATUS         0x0057U
 #define BQ76942_SUBCMD_DASTATUS5          0x0075U /* REG18/VSS/temps + CC1/CC3 */
 #define BQ76942_SUBCMD_CONFIG_UPDATE      0x0090U
@@ -136,6 +139,33 @@ extern "C" {
 #define BQ76942_DM_TS2_CONFIG             0x92FEU
 /* Settings:Configuration:Vcell Mode (H2 @ 0x9304). Bit N = Cell(N+1) connected. */
 #define BQ76942_DM_VCELL_MODE             0x9304U
+
+/* Settings:Configuration: CFETOFF/DFETOFF pin (TRM 13.3.2.9/10). */
+#define BQ76942_DM_CFETOFF_PIN_CONFIG     0x92FAU
+#define BQ76942_DM_DFETOFF_PIN_CONFIG     0x92FBU
+/* PIN_FXN=2：CFETOFF/DFETOFF 输入；OPT5=0 高有效（与 MCU SET=禁止 一致）。 */
+#define BQ76942_PINCFG_FETOFF_ACTIVE_HIGH  0x02U
+
+/* Settings:FET (TRM 13.3.6). */
+#define BQ76942_DM_FET_OPTIONS            0x9308U /* default 0x0D, PDSG_EN=0 */
+#define BQ76942_DM_PREDISCHARGE_TIMEOUT     0x930EU /* U1, ×10 ms; 0=voltage only */
+#define BQ76942_DM_PREDISCHARGE_STOP_DELTA  0x930FU /* U1, ×10 mV */
+#define BQ76942_FETOPT_PDSG_EN              (1U << 4)
+#ifndef BQ76942_PREDISCHARGE_TIMEOUT
+#define BQ76942_PREDISCHARGE_TIMEOUT        50U /* 50 × 10 ms = 500 ms */
+#endif
+#ifndef BQ76942_PREDISCHARGE_STOP_DELTA
+#define BQ76942_PREDISCHARGE_STOP_DELTA     50U /* 50 × 10 mV = 500 mV */
+#endif
+
+/* 0x0097 FET_CONTROL: bit0=DSG_OFF, bit1=PDSG_OFF, bit2=CHG_OFF, bit3=PCHG_OFF。 */
+#define BQ76942_FETCTRL_ALLOW_ALL           0x00U
+/** 仅允许 PDSG：CHG/PCHG/DSG 强制关，PDSG 由 PDSG_EN 自动拉起。 */
+#define BQ76942_FETCTRL_PDSG_ONLY           0x0DU
+#define BQ76942_FETSTAT_CHG_SIDE            \
+  (BQ76942_FETSTAT_CHG_FET | BQ76942_FETSTAT_PCHG_FET)
+#define BQ76942_FETSTAT_DSG_SIDE            \
+  (BQ76942_FETSTAT_DSG_FET | BQ76942_FETSTAT_PDSG_FET)
 #ifndef BQ76942_VCELL_MODE
 /* 6S: Cell1..6 (bit0..5); Cell7..10 (bit6..9) unused. */
 #define BQ76942_VCELL_MODE                0x003FU
@@ -173,11 +203,14 @@ extern "C" {
 /* 0x0057 Manufacturing Status bits */
 #define BQ76942_MFG_FET_EN                (1U << 4)
 
-/* 0x7F FET Status — TRM 12.2.20 */
+/* 0x7F FET Status — TRM 12.2.20 (bits 6:4 = pin mirrors, 3:0 = FET drivers). */
 #define BQ76942_FETSTAT_CHG_FET           (1U << 0)
 #define BQ76942_FETSTAT_PCHG_FET          (1U << 1)
 #define BQ76942_FETSTAT_DSG_FET           (1U << 2)
 #define BQ76942_FETSTAT_PDSG_FET          (1U << 3)
+#define BQ76942_FETSTAT_DCHG_PIN          (1U << 4)
+#define BQ76942_FETSTAT_DDSG_PIN          (1U << 5)
+#define BQ76942_FETSTAT_ALRT_PIN          (1U << 6)
 
 /* 0x03 Safety Status A — TRM (current / cell voltage faults) */
 #define BQ76942_SA_SCD                    (1U << 7) /* 放电短路安全警报 */
@@ -254,6 +287,7 @@ typedef struct
   uint16_t cell_mv[BQ76942_CELL_COUNT]; /* per-cell voltage, mV */
   uint32_t pack_mv;                     /* Stack (0x34), 电池组顶部的 16 位电压mV */
   uint32_t output_mv;                   /* PACK pin (0x36),PACK 引脚上的 16 位电压 mV */
+  uint32_t ld_mv;                       /* LD pin (0x38), 负载侧/母线电容电压 mV */
   int16_t current_ma;                   /* CC2 (0x3A), mA (+ charge / - discharge) */
   int16_t current_cc3_ma;               /* CC3 avg of CC2 samples, mA (DASTATUS5) */
   uint16_t vcell_min_mv;
@@ -261,12 +295,21 @@ typedef struct
   bool valid;
 } bq76942_meas_t;
 
+/** 创建 BQ I2C 递归互斥锁，须在任务启动前调用。 */
+void BQ76942_LockInit(void);
+/** 占用 I2C：自检/多步读写期间持有，防止其他任务交错篡改。 */
+bool BQ76942_I2cLock(void);
+void BQ76942_I2cUnlock(void);
+
 bool BQ76942_IsReady(I2C_HandleTypeDef *hi2c);
 bool BQ76942_ReadDirectU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t *raw);
 bool BQ76942_ReadDirectS16(I2C_HandleTypeDef *hi2c, uint8_t cmd, int16_t *raw);
 bool BQ76942_ReadTempRaw(I2C_HandleTypeDef *hi2c, uint8_t cmd, int16_t *raw);
 bool BQ76942_ReadTemperatures(I2C_HandleTypeDef *hi2c, bq76942_temp_t *out);
 bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out);
+/** 仅读 Stack(0x34)+PACK(0x36)，供 S1 判断输出电容是否充满。 */
+bool BQ76942_ReadStackOutputMv(I2C_HandleTypeDef *hi2c, uint32_t *stack_mv,
+                               uint32_t *output_mv);
 
 bool BQ76942_DataMemoryWrite(I2C_HandleTypeDef *hi2c, uint16_t addr,
                              const uint8_t *data, uint8_t len);
@@ -278,6 +321,8 @@ bool BQ76942_ReadProtectionConfig(I2C_HandleTypeDef *hi2c,
                                   bq76942_prot_cfg_t *out);
 /** Write Vdiv Offset to 0x91B2 (requires CONFIG_UPDATE). Call once at init. */
 bool BQ76942_WriteVdivOffset(I2C_HandleTypeDef *hi2c, int16_t offset_userv);
+/** CONFIG_UPDATE 内写入 Vdiv Offset = 1V（BQ76942_Vdiv_OFFSET_VALUE），供自检读 PACK 前调用。 */
+bool BQ76942_ApplyVdivOffset1V(I2C_HandleTypeDef *hi2c);
 /** Write CC Gain (0x91A8) + Capacity Gain (0x91AC); requires CONFIG_UPDATE. */
 bool BQ76942_WriteCcGain(I2C_HandleTypeDef *hi2c, float cc_gain);
 /** Write Protections:SCD:Delay @ 0x9287; requires CONFIG_UPDATE. */
@@ -306,8 +351,14 @@ bool BQ76942_SetBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t mask);
 bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask);
 
 /**
- * Release MCU DFETOFF/CFETOFF, exit FET Test mode if needed, ALL_FETS_ON.
- * Required before DSG path can supply pack 24 V output.
+ * FET_EN + ALL_FETS_OFF + 先 PDSG_ONLY，见到 PDSG/DSG 后再 ALLOW_ALL。
+ * PDSG_EN / 预放电超时已在 InitCalibration 写入。
+ * 见到 PDSG 或 DSG 置位才返回 true。
+ */
+bool BQ76942_EnablePreDischargePath(I2C_HandleTypeDef *hi2c);
+
+/**
+ * FET_EN + ALL_FETS_ON。不要求此刻已是 DSG（芯片可能仍在 PDSG）。
  */
 bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c);
 

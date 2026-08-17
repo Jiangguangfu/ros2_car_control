@@ -36,6 +36,7 @@
 #include "soc_estimator.h"
 #include "soh_estimator.h"
 #include "bms_lin_config.h"
+#include "soft_start.h"
 #include "uart_battery_report.h"
 #include "lin_charger.h"
 #include "lin_driver.h"
@@ -85,8 +86,8 @@ const osThreadAttr_t CommTask_attributes = {
 osThreadId_t ServiceTaskHandle;
 const osThreadAttr_t ServiceTask_attributes = {
   .name = "ServiceTask",
-  .priority = (osPriority_t) osPriorityBelowNormal,
-  .stack_size = 384 * 4
+  .priority = (osPriority_t) osPriorityRealtime,
+  .stack_size = 512 * 4
 };
 /* Definitions for PowerTask */
 osThreadId_t PowerTaskHandle;
@@ -159,7 +160,7 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
+  BQ76942_LockInit();
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -215,6 +216,11 @@ void StartCommonTaskCommon(void *argument)
   LinDiagTx_Init();
 #endif
 
+  while (!SoftStart_IsSystemReady() && !SoftStart_IsBootFault())
+  {
+    osDelay(10);
+  }
+
   for (;;) {
     static uint32_t s_can_elapsed_ms;
 
@@ -253,7 +259,16 @@ void StartServiceTask(void *argument)
   /* USER CODE BEGIN ServiceTask */
   (void)argument;
 
-  for (;;) {
+  SoftStart_Init();
+
+  while (!SoftStart_IsSystemReady() && !SoftStart_IsBootFault())
+  {
+    SoftStart_Process();
+    osDelay(10);
+  }
+
+  for (;;)
+  {
     osDelay(1000);
   }
   /* USER CODE END ServiceTask */
@@ -271,15 +286,24 @@ void StartPowerTask(void *argument)
   /* USER CODE BEGIN PowerTask */
   (void)argument;
 
-  /* Wait for rails + first BQ samples from BmsTask. */
-  osDelay(500);
-  ChargePath_Init();
-  BSP_PowerRails_Init();
+  while (!SoftStart_IsSystemReady() && !SoftStart_IsBootFault())
+  {
+    osDelay(10);
+  }
+
+  if (SoftStart_IsSystemReady())
+  {
+    ChargePath_Init();
+    BSP_PowerRails_Init();
+  }
 
   for (;;)
   {
-    BSP_PowerRails_Process();
-    ChargePath_Apply();
+    if (SoftStart_IsSystemReady())
+    {
+      BSP_PowerRails_Process();
+      ChargePath_Apply();
+    }
     osDelay(200);
   }
   /* USER CODE END PowerTask */
@@ -295,27 +319,42 @@ void StartPowerTask(void *argument)
 void StartBmsTask(void *argument)
 {
   /* USER CODE BEGIN BmsTask */
-  static bool s_dsg_enabled = false;
-  static bool s_bq_calibrated = false;
   static bool s_bq_prot_read = false;
   (void)argument;
 
-  /* Wait for power rails (ServiceTask enables 7V5/12V). */
-  osDelay(300);
+  while (!SoftStart_IsSystemReady() && !SoftStart_IsBootFault())
+  {
+    osDelay(10);
+  }
+
+  if (!SoftStart_IsSystemReady())
+  {
+    for (;;)
+    {
+      osDelay(1000);
+    }
+  }
+
   ChargePath_Init();
   ChargeManager_Init();
   CellVoltageProtect_Init();
   Balance_Init();
   Soc_Init();
   Soh_Init();
+
+  if (!SoftStart_IsBqCalibrated())
+  {
+    SoftStart_SetBqCalibrated(BQ76942_InitCalibration(&hi2c2));
+  }
+
   for (;;)
   {
-    if (!s_bq_calibrated)
+    if (!SoftStart_IsBqCalibrated())
     {
-      s_bq_calibrated = BQ76942_InitCalibration(&hi2c2);
+      SoftStart_SetBqCalibrated(BQ76942_InitCalibration(&hi2c2));
     }
 
-    if (s_bq_calibrated && !s_bq_prot_read)
+    if (SoftStart_IsBqCalibrated() && !s_bq_prot_read)
     {
       s_bq_prot_read = BQ76942_ReadProtectionConfig(&hi2c2, &s_bq_prot_cfg);
     }
@@ -371,23 +410,11 @@ void StartBmsTask(void *argument)
       Soh_Process(&soh_in, BMS_TASK_PERIOD_MS);
     }
 
-    /* BQ DSG FET；失败则周期重试（24V GPIO 由电源轨仲裁）。 */
-    if (!s_dsg_enabled && (BSP_PowerRails_GetState() < PWR_STATE_FAULT))
-    {
-      s_dsg_enabled = BQ76942_EnableDischargePath(&hi2c2);
-      ChargePath_Apply();
-    }
-    else if (BSP_PowerRails_GetState() == PWR_STATE_FAULT)
-    {
-      s_dsg_enabled = false;
-    }
-
     osDelay(BMS_TASK_PERIOD_MS);
   }
   /* USER CODE END BmsTask */
 }
 
-/* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 
 /* USER CODE END Application */

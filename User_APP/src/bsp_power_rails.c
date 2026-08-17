@@ -10,6 +10,7 @@
 #include "charge_path.h"
 #include "app_freertos.h"
 #include "main.h"
+#include "cmsis_os2.h"
 
 /* Thermal thresholds (°C * 10). */
 #define THERMAL_WARN_ENTER_CX10           400
@@ -37,9 +38,9 @@
 #define PWR_RAILS_ENABLE_ALL_EXCEPT_19V \
   ((uint8_t)(PWR_MASK_ALL & ~PWR_MASK_19V))
 
-/* FAULT: CN8 fan on +24V_OUT1 only; 6.5V/5V LDO bus off. */
+/* FAULT: 本项目不用 24V，故障时全部电源轨关闭。 */
 #define PWR_RAILS_FAULT_FAN_ENABLE \
-  ((uint8_t)(PWR_MASK_24V))
+  ((uint8_t)0U)
 
 /* Legacy alias (enable mask, not drop list). */
 #define PWR_RAILS_DROP_19V  PWR_RAILS_ENABLE_ALL_EXCEPT_19V
@@ -61,10 +62,18 @@ static pwr_state_t s_current_state;
 static pwr_reason_t s_current_reason;
 static uint8_t s_soft_warn_count;
 static uint8_t s_soft_fault_count;
+static bool s_boot_complete;
 
 /* -------------------------------------------------------------------------- */
 /* GPIO                                                                       */
 /* -------------------------------------------------------------------------- */
+
+static void PowerRails_Hold24VOff(void)
+{
+  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin,
+                    GPIO_PIN_RESET);
+  s_pwr_rails_status.rail_on[PWR_RAIL_24V] = false;
+}
 
 static void PowerRails_WriteGpio(pwr_rail_id_t rail, bool on)
 {
@@ -73,7 +82,8 @@ static void PowerRails_WriteGpio(pwr_rail_id_t rail, bool on)
   switch (rail)
   {
     case PWR_RAIL_24V:
-      HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, level);
+      (void)level;
+      PowerRails_Hold24VOff();
       break;
     case PWR_RAIL_19V:
       HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, level);
@@ -98,6 +108,12 @@ static void PowerRails_DriveMask(uint8_t enable_mask)
   for (i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
   {
     bool on;
+
+    if (i == (uint8_t)PWR_RAIL_24V)
+    {
+      PowerRails_Hold24VOff();
+      continue;
+    }
 
     if (i == (uint8_t)PWR_RAIL_5V)
     {
@@ -626,7 +642,117 @@ void BSP_PowerRails_Init(void)
   BSP_Fan_Init();
   ChargePath_SetThermalInhibit(false, false);
   ChargePath_SetProtectInhibit(false, false);
-  PowerRails_ApplyActuators();
+
+  if (s_boot_complete)
+  {
+    PowerRails_ApplyActuators();
+  }
+}
+
+void BSP_PowerRails_PreBoot(void)
+{
+  GPIO_InitTypeDef gpio = {0};
+  uint8_t i;
+
+  gpio.Pin = PWR_24V_BYPASS_EN_Pin;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_PULLDOWN;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(PWR_24V_BYPASS_EN_GPIO_Port, &gpio);
+
+  s_boot_complete = false;
+
+  for (i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
+  {
+    s_pwr_rails_status.rail_on[i] = false;
+  }
+
+  s_pwr_rails_status.enabled_mask = 0U;
+  s_pwr_rails_status.power_rails_mask = PWR_MASK_ALL;
+
+  for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
+  {
+    s_request_mask[i] = PWR_MASK_ALL;
+  }
+
+  PowerRails_DriveMask(0U);
+  PowerRails_Hold24VOff();
+}
+/*打开电源轨*/
+bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on)
+{
+  if (rail >= PWR_RAIL_COUNT)
+  {
+    return false;
+  }
+
+  if (rail == PWR_RAIL_24V)
+  {
+    PowerRails_Hold24VOff();
+    return !on;
+  }
+
+  if (rail == PWR_RAIL_5V)
+  {
+    s_pwr_rails_status.rail_on[PWR_RAIL_5V] =
+        on && s_pwr_rails_status.rail_on[PWR_RAIL_6V5];
+    return true;
+  }
+
+  PowerRails_WriteGpio(rail, on);
+  s_pwr_rails_status.rail_on[rail] = on;
+
+  if (rail == PWR_RAIL_6V5)
+  {
+    s_pwr_rails_status.rail_on[PWR_RAIL_5V] = on;
+  }
+
+  s_pwr_rails_status.enabled_mask = 0U;
+  for (uint8_t i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
+  {
+    if (s_pwr_rails_status.rail_on[i])
+    {
+      s_pwr_rails_status.enabled_mask =
+          (uint8_t)(s_pwr_rails_status.enabled_mask | (1u << i));
+    }
+  }
+
+  return true;
+}
+
+bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms)
+{
+  const uint32_t settle_ms = 300U;
+  uint32_t elapsed = 0U;
+
+  if ((rail >= PWR_RAIL_COUNT) || !s_pwr_rails_status.rail_on[rail])
+  {
+    return false;
+  }
+
+  while (elapsed < settle_ms)
+  {
+    if (elapsed >= timeout_ms)
+    {
+      return false;
+    }
+
+    osDelay(10U);
+    elapsed += 10U;
+  }
+
+  /* 预留：后续在此读取 12V/19V PGOOD GPIO 或 ADC。 */
+  return true;
+}
+
+void BSP_PowerRails_SetBootComplete(bool complete)
+{
+  s_boot_complete = complete;
+}
+
+bool BSP_PowerRails_IsBootComplete(void)
+{
+  return s_boot_complete;
 }
 
 void BSP_PowerRails_BootSequence(void)
@@ -634,13 +760,10 @@ void BSP_PowerRails_BootSequence(void)
   uint8_t i;
 
   PowerRails_DriveMask(0U);
+  PowerRails_Hold24VOff();
 
-  PowerRails_WriteGpio(PWR_RAIL_24V, true);
-  s_pwr_rails_status.rail_on[PWR_RAIL_24V] = true;
-  HAL_Delay(300);
-
-  PowerRails_WriteGpio(PWR_RAIL_19V, true);
-  s_pwr_rails_status.rail_on[PWR_RAIL_19V] = true;
+  PowerRails_WriteGpio(PWR_RAIL_12V, true);
+  s_pwr_rails_status.rail_on[PWR_RAIL_12V] = true;
   HAL_Delay(300);
 
   PowerRails_WriteGpio(PWR_RAIL_6V5, true);
@@ -648,8 +771,8 @@ void BSP_PowerRails_BootSequence(void)
   s_pwr_rails_status.rail_on[PWR_RAIL_5V] = true;
   HAL_Delay(200);
 
-  PowerRails_WriteGpio(PWR_RAIL_12V, true);
-  s_pwr_rails_status.rail_on[PWR_RAIL_12V] = true;
+  PowerRails_WriteGpio(PWR_RAIL_19V, true);
+  s_pwr_rails_status.rail_on[PWR_RAIL_19V] = true;
 
   s_pwr_rails_status.enabled_mask = PWR_MASK_ALL;
   s_pwr_rails_status.power_rails_mask = PWR_MASK_ALL;
@@ -684,6 +807,11 @@ void BSP_PowerRails_UpdateBqSafety(uint8_t status_a, uint8_t status_b,
 
 void BSP_PowerRails_Process(void)
 {
+  if (!s_boot_complete)
+  {
+    return;
+  }
+
   PowerRails_EvalThermal();
   PowerRails_EvalCurrent();
   PowerRails_ApplyActuators();

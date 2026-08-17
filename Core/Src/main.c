@@ -112,10 +112,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  /* FET-off safe defaults before rails come up. */
+  /* FET-off safe defaults before rails come up (active-high inhibit). */
   HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
-  BSP_PowerRails_BootSequence();
+  BSP_PowerRails_PreBoot();
   MX_GPDMA1_Init();
   MX_ADC1_Init();
   MX_I2C2_Init();
@@ -678,10 +678,12 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, PWR_7V5_EN_Pin|BQ_DFETOFF_Pin|PWR_19V_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, PWR_7V5_EN_Pin|PWR_19V_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, PER_12V_EN_Pin|BQ_CFETOFF_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PER_12V_EN_GPIO_Port, PER_12V_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(WS2812_DATA_GPIO_Port, WS2812_DATA_Pin, GPIO_PIN_RESET);
@@ -689,9 +691,11 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PWR_24V_BYPASS_EN_Pin */
   GPIO_InitStruct.Pin = PWR_24V_BYPASS_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(PWR_24V_BYPASS_EN_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin,
+                    GPIO_PIN_RESET);
 
   /*Configure GPIO pins : BQ_DCHG_Pin BQ_DDSG_Pin */
   GPIO_InitStruct.Pin = BQ_DCHG_Pin|BQ_DDSG_Pin;

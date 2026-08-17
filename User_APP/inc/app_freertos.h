@@ -33,11 +33,11 @@ extern "C" {
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bq76942.h"
+#include "soft_start.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/

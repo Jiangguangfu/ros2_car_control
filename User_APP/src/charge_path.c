@@ -16,6 +16,7 @@ static bool s_protect_discharge_off;
 static bool s_voltage_charge_off;
 static bool s_voltage_discharge_off;
 static bool s_lin_comm_charge_off;
+static bool s_boot_discharge_off;
 static bool s_charge_inhibited;
 static bool s_discharge_inhibited;
 
@@ -34,6 +35,7 @@ void ChargePath_Init(void)
     s_voltage_charge_off = false;
     s_voltage_discharge_off = false;
     s_lin_comm_charge_off = false;
+    s_boot_discharge_off = true;
     s_charge_inhibited = false;
     s_discharge_inhibited = false;
     s_inited = true;
@@ -75,6 +77,11 @@ void ChargePath_SetLinCommInhibit(bool charge_off)
   s_lin_comm_charge_off = charge_off;
 }
 
+void ChargePath_SetBootDischargeInhibit(bool discharge_off)
+{
+  s_boot_discharge_off = discharge_off;
+}
+
 void ChargePath_Apply(void)
 {
   s_charge_inhibited =
@@ -82,7 +89,7 @@ void ChargePath_Apply(void)
       s_protect_charge_off || s_voltage_charge_off || s_lin_comm_charge_off;
   s_discharge_inhibited =
       s_thermal_discharge_off || s_protect_discharge_off ||
-      s_voltage_discharge_off;
+      s_voltage_discharge_off || s_boot_discharge_off;
 
   /* Active-high: SET forces corresponding FET path off. */
   HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin,

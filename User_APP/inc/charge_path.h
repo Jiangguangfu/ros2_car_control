@@ -36,8 +36,17 @@ void ChargePath_SetProtectInhibit(bool charge_off, bool discharge_off);
 /** Cell voltage protect: COV stop charge, CUV stop discharge. */
 void ChargePath_SetVoltageInhibit(bool charge_off, bool discharge_off);
 
+/** Cell voltage protect: COV stop charge, CUV stop discharge. */
+void ChargePath_SetVoltageInhibit(bool charge_off, bool discharge_off);
+
 /** LIN 通信超时：暂停充电路径（不断开 CHG 状态机）。 */
 void ChargePath_SetLinCommInhibit(bool charge_off);
+
+/**
+ * Boot / discharge path gate: default inhibit until self-check releases (S1/S2).
+ * discharge_off=true → DFETOFF high (block DSG/PDSG).
+ */
+void ChargePath_SetBootDischargeInhibit(bool discharge_off);
 
 /** Drive CFETOFF/DFETOFF from OR of all requests. */
 void ChargePath_Apply(void);
