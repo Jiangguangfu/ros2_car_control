@@ -22,8 +22,8 @@ void ChargePath_Init(void);
 void ChargePath_SetThermalInhibit(bool charge_off, bool discharge_off);
 
 /**
- * Cell imbalance request: stop charging only (passive balance may continue).
- * Assert when Δ ≥ 50 mV; clear when Δ ≤ 30 mV.
+ * Stop charging only (top fine-balance or mid highest-cell protect may run).
+ * Mid: relax classify / vmax protect. Top: large Δ pause (see balance manager).
  */
 void ChargePath_SetImbalanceChargeInhibit(bool charge_off);
 

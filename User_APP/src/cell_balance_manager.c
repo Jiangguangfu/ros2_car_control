@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    cell_balance_manager.c
- * @brief   6S NMC passive balancing policy for BQ76942.
+ * @brief   6S NMC passive balancing: top fine-balance + mid highest-cell protect.
  ******************************************************************************
  */
 #include "cell_balance_manager.h"
@@ -13,6 +13,7 @@
 static balance_status_t s_status;
 static bool s_charger_present_explicit;
 static bool s_charger_present_value;
+static bool s_mid_session_active;
 
 static bool Balance_IsTopReady(bool soc_valid,
                                uint8_t soc_percent,
@@ -28,6 +29,12 @@ static bool Balance_IsTopReady(bool soc_valid,
   return (vmin_mv >= vmin_threshold);
 }
 
+static bool Balance_IsMidState(balance_state_t state)
+{
+  return (state == BALANCE_STATE_MID_RELAX) ||
+         (state == BALANCE_STATE_MID_PROTECT);
+}
+
 static void Balance_StopAll(I2C_HandleTypeDef *hi2c)
 {
   if (hi2c != NULL)
@@ -36,6 +43,24 @@ static void Balance_StopAll(I2C_HandleTypeDef *hi2c)
   }
 
   s_status.active_mask = 0U;
+}
+
+static void Balance_ApplyChargeInhibit(bool inhibit)
+{
+  s_status.imbalance_charge_inhibit = inhibit;
+  ChargePath_SetImbalanceChargeInhibit(inhibit);
+  ChargePath_Apply();
+}
+
+static void Balance_ResetMidSession(void)
+{
+  s_status.mid_class = BALANCE_MID_CLASS_NONE;
+  s_status.mid_observe_done = false;
+  s_status.mid_delta_at_pause_mv = 0U;
+  s_status.mid_vmax_at_pause_mv = 0U;
+  s_status.mid_relax_count = 0U;
+  s_status.mid_protect_count = 0U;
+  s_status.mid_protect_cooldown = 0U;
 }
 
 static bool Balance_CellsSampleValid(const uint16_t *cell_mv, uint8_t count)
@@ -98,6 +123,65 @@ static uint16_t Balance_SelectMask(const uint16_t *cell_mv, uint16_t vmin_mv,
       }
 
       if (cell_mv[i] < (uint16_t)(vmin_mv + BALANCE_STOP_DELTA_MV))
+      {
+        continue;
+      }
+
+      if ((best_i < 0) || (cell_mv[i] > best_mv))
+      {
+        best_i = (int8_t)i;
+        best_mv = cell_mv[i];
+      }
+    }
+
+    if (best_i < 0)
+    {
+      break;
+    }
+
+    mask |= (1U << (uint8_t)best_i);
+  }
+
+  return (uint16_t)(mask & BMS_BALANCE_MASK_VALID);
+}
+
+/* Bleed only the highest cell(s) still in the warn/danger band. */
+static uint16_t Balance_SelectProtectMask(const uint16_t *cell_mv,
+                                          uint16_t vmax_mv,
+                                          uint8_t count)
+{
+  uint16_t mask = 0U;
+  uint8_t pick;
+  uint16_t floor_mv;
+
+  if (vmax_mv > BALANCE_MID_PROTECT_NEAR_MV)
+  {
+    floor_mv = (uint16_t)(vmax_mv - BALANCE_MID_PROTECT_NEAR_MV);
+  }
+  else
+  {
+    floor_mv = 0U;
+  }
+
+  if (floor_mv < BALANCE_MID_VMAX_WARN_MV)
+  {
+    floor_mv = BALANCE_MID_VMAX_WARN_MV;
+  }
+
+  for (pick = 0U; pick < BALANCE_MAX_CELLS_AT_ONCE; pick++)
+  {
+    uint8_t i;
+    int8_t best_i = -1;
+    uint16_t best_mv = 0U;
+
+    for (i = 0U; i < count; i++)
+    {
+      if ((mask & (1U << i)) != 0U)
+      {
+        continue;
+      }
+
+      if (cell_mv[i] < floor_mv)
       {
         continue;
       }
@@ -214,13 +298,12 @@ static bool Balance_EvalCriticalFault(const pwr_rails_status_t *protect,
   return false;
 }
 
-static void Balance_UpdateImbalanceChargeInhibit(bool sample_stable)
+static void Balance_UpdateTopChargeInhibit(bool sample_stable)
 {
   bool inhibit = ChargePath_IsImbalanceChargeInhibit();
 
   if (!sample_stable)
   {
-    /* Keep previous request until samples recover; still apply path. */
     s_status.imbalance_charge_inhibit = inhibit;
     ChargePath_Apply();
     return;
@@ -235,7 +318,6 @@ static void Balance_UpdateImbalanceChargeInhibit(bool sample_stable)
   }
   else
   {
-    /* Enter stop-charge only in a charge context (FET on or already present). */
     if ((s_status.delta_mv >= CHARGE_IMBALANCE_STOP_DELTA_MV) &&
         (s_status.chg_fet_on || s_status.charger_present))
     {
@@ -243,9 +325,7 @@ static void Balance_UpdateImbalanceChargeInhibit(bool sample_stable)
     }
   }
 
-  s_status.imbalance_charge_inhibit = inhibit;
-  ChargePath_SetImbalanceChargeInhibit(inhibit);
-  ChargePath_Apply();
+  Balance_ApplyChargeInhibit(inhibit);
 }
 
 static void Balance_UpdateChargerPath(void)
@@ -286,7 +366,7 @@ static void Balance_UpdateChargerPath(void)
   }
 
   /*
-   * Balance may continue while imbalance holds charge off:
+   * Balance / mid-protect may continue while imbalance holds charge off:
    * charger_present && (chg_fet_on || imbalance_hold) && !discharge.
    */
   path_ok = s_status.charger_present &&
@@ -320,6 +400,119 @@ static void Balance_UpdateChargerPath(void)
       (s_status.charge_stable_count >= BALANCE_CHARGE_DEBOUNCE_COUNT);
 }
 
+static void Balance_EnterMidRelax(void)
+{
+  s_status.mid_delta_at_pause_mv = s_status.delta_mv;
+  s_status.mid_vmax_at_pause_mv = s_status.vmax_mv;
+  s_status.mid_relax_count = 0U;
+  s_status.mid_protect_count = 0U;
+  s_status.state = BALANCE_STATE_MID_RELAX;
+  s_status.inhibit_reason = BALANCE_INHIBIT_MID_OBSERVE;
+  Balance_ApplyChargeInhibit(true);
+  Balance_UpdateChargerPath();
+}
+
+static void Balance_LeaveMidToIdle(I2C_HandleTypeDef *hi2c,
+                                   balance_inhibit_reason_t reason)
+{
+  Balance_StopAll(hi2c);
+  s_status.mid_relax_count = 0U;
+  s_status.mid_protect_count = 0U;
+  s_status.state = BALANCE_STATE_IDLE;
+  s_status.inhibit_reason = reason;
+  Balance_ApplyChargeInhibit(false);
+  Balance_UpdateChargerPath();
+}
+
+static void Balance_ClassifyAfterRelax(void)
+{
+  const uint16_t rest_delta = s_status.delta_mv;
+  const uint16_t rest_vmax = s_status.vmax_mv;
+  uint16_t shrink = 0U;
+
+  if (s_status.mid_delta_at_pause_mv > rest_delta)
+  {
+    shrink = (uint16_t)(s_status.mid_delta_at_pause_mv - rest_delta);
+  }
+
+  /* After IR falls, highest cell still at the ceiling → real and threatening. */
+  if (rest_vmax >= BALANCE_MID_VMAX_DANGER_MV)
+  {
+    s_status.mid_class = BALANCE_MID_CLASS_REAL_THREAT;
+    s_status.mid_observe_done = true;
+    return;
+  }
+
+  s_status.mid_observe_done = true;
+
+  if ((shrink >= BALANCE_MID_FAKE_SHRINK_MV) ||
+      (rest_delta < BALANCE_MID_REST_REAL_DELTA_MV))
+  {
+    s_status.mid_class = BALANCE_MID_CLASS_FAKE_IR;
+    return;
+  }
+
+  s_status.mid_class = BALANCE_MID_CLASS_REAL_SAFE;
+}
+
+static bool Balance_EnterMidProtect(I2C_HandleTypeDef *hi2c)
+{
+  const uint16_t mask = Balance_SelectProtectMask(s_status.cell_mv,
+                                                  s_status.vmax_mv,
+                                                  BMS_CELL_COUNT);
+
+  s_status.mid_class = BALANCE_MID_CLASS_REAL_THREAT;
+  s_status.mid_observe_done = true;
+  s_status.mid_protect_count = 0U;
+  s_status.state = BALANCE_STATE_MID_PROTECT;
+  s_status.inhibit_reason = BALANCE_INHIBIT_MID_PROTECT;
+  Balance_ApplyChargeInhibit(true);
+  Balance_UpdateChargerPath();
+
+  if (!Balance_ApplyMask(hi2c, mask))
+  {
+    return false;
+  }
+
+  return true;
+}
+
+static bool Balance_MidNeedRelax(void)
+{
+  const bool charge_ctx = s_status.charger_present &&
+                          (s_status.chg_fet_on ||
+                           ChargePath_IsImbalanceChargeInhibit());
+
+  if (!charge_ctx || s_status.discharge_detected)
+  {
+    return false;
+  }
+
+  if ((s_status.vmax_mv >= BALANCE_MID_VMAX_DANGER_MV) &&
+      (s_status.mid_protect_cooldown == 0U))
+  {
+    return true;
+  }
+
+  if ((!s_status.mid_observe_done) &&
+      s_status.charger_active_stable &&
+      (s_status.delta_mv >= BALANCE_MID_OBSERVE_DELTA_MV))
+  {
+    return true;
+  }
+
+  return false;
+}
+
+static void Balance_TickMidCooldown(void)
+{
+  if ((s_status.state != BALANCE_STATE_MID_PROTECT) &&
+      (s_status.mid_protect_cooldown > 0U))
+  {
+    s_status.mid_protect_cooldown--;
+  }
+}
+
 void Balance_Init(void)
 {
   s_status.user_enabled = true;
@@ -335,6 +528,8 @@ void Balance_Init(void)
   s_status.imbalance_charge_inhibit = false;
   s_charger_present_explicit = false;
   s_charger_present_value = false;
+  s_mid_session_active = false;
+  Balance_ResetMidSession();
   ChargePath_SetImbalanceChargeInhibit(false);
 }
 
@@ -346,6 +541,8 @@ void Balance_SetEnabled(bool enable)
   {
     s_status.state = BALANCE_STATE_DISABLED;
     s_status.inhibit_reason = BALANCE_INHIBIT_DISABLED;
+    Balance_ResetMidSession();
+    Balance_ApplyChargeInhibit(false);
   }
   else if (s_status.state == BALANCE_STATE_DISABLED)
   {
@@ -391,6 +588,8 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
   bool critical_fault;
   bool bq_protect = false;
   bool common_ok;
+  bool sample_stable;
+  bool in_top_window;
   uint8_t i;
 
   s_status.start_conditions_ok = false;
@@ -404,6 +603,8 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
       Balance_StopAll(hi2c);
       s_status.state = BALANCE_STATE_DISABLED;
       s_status.inhibit_reason = BALANCE_INHIBIT_DISABLED;
+      Balance_ResetMidSession();
+      Balance_ApplyChargeInhibit(false);
     }
     return;
   }
@@ -467,10 +668,16 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
   }
 
   Balance_UpdateChargerPath();
-  Balance_UpdateImbalanceChargeInhibit(
-      sample_ok && (s_status.stable_count >= BALANCE_SAMPLE_STABLE_COUNT));
-  /* Re-evaluate path after imbalance may have changed CFETOFF / present latch. */
-  Balance_UpdateChargerPath();
+
+  if (s_status.charger_present)
+  {
+    s_mid_session_active = true;
+  }
+  else if (s_mid_session_active && !ChargePath_IsImbalanceChargeInhibit())
+  {
+    Balance_ResetMidSession();
+    s_mid_session_active = false;
+  }
 
   temperature_normal = Balance_EvalTemperature();
 
@@ -482,13 +689,16 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
       s_status.soc_valid, s_status.soc_percent, s_status.vmin_mv,
       BALANCE_SOC_HOLD_PERCENT, BALANCE_VMIN_HOLD_MV);
 
+  sample_stable = sample_ok &&
+                  (s_status.stable_count >= BALANCE_SAMPLE_STABLE_COUNT);
+
   critical_fault = false;
   if (comm_fail >= BALANCE_COMM_FAIL_THRESHOLD)
   {
     critical_fault = true;
     s_status.inhibit_reason = BALANCE_INHIBIT_COMM;
   }
-  else if (sample_ok && (s_status.stable_count >= BALANCE_SAMPLE_STABLE_COUNT))
+  else if (sample_stable)
   {
     critical_fault = Balance_EvalCriticalFault(thermal, bq_protect, comm_fail);
   }
@@ -496,16 +706,24 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
   if (critical_fault)
   {
     Balance_StopAll(hi2c);
+    if (Balance_IsMidState(s_status.state))
+    {
+      Balance_ApplyChargeInhibit(false);
+    }
     s_status.state = BALANCE_STATE_INHIBITED;
     return;
   }
 
   if (!sample_ok || (s_status.stable_count < BALANCE_SAMPLE_STABLE_COUNT))
   {
-    if (s_status.state == BALANCE_STATE_ACTIVE)
+    if ((s_status.state == BALANCE_STATE_ACTIVE) ||
+        (s_status.state == BALANCE_STATE_MID_PROTECT))
     {
       Balance_StopAll(hi2c);
-      s_status.state = BALANCE_STATE_IDLE;
+      if (s_status.state == BALANCE_STATE_ACTIVE)
+      {
+        s_status.state = BALANCE_STATE_IDLE;
+      }
     }
 
     s_status.inhibit_reason = sample_ok ? BALANCE_INHIBIT_SAMPLE_UNSTABLE :
@@ -535,14 +753,21 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
       s_status.inhibit_reason = BALANCE_INHIBIT_NONE;
     }
 
-    if (s_status.state == BALANCE_STATE_ACTIVE)
+    if ((s_status.state == BALANCE_STATE_ACTIVE) ||
+        Balance_IsMidState(s_status.state))
     {
       Balance_StopAll(hi2c);
+      if (Balance_IsMidState(s_status.state))
+      {
+        Balance_ApplyChargeInhibit(false);
+      }
       s_status.state = BALANCE_STATE_IDLE;
     }
 
     return;
   }
+
+  Balance_TickMidCooldown();
 
   s_status.start_conditions_ok =
       common_ok &&
@@ -557,6 +782,131 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
       (s_status.delta_mv > BALANCE_STOP_DELTA_MV);
 
   s_status.delta_ok = (s_status.delta_mv <= BALANCE_STOP_DELTA_MV);
+
+  /* Hold window is only for staying in ACTIVE; mid protect still runs
+   * until the start window (SOC 90% / vmin 3900) is actually reached. */
+  in_top_window = s_status.top_start_ready ||
+                  (s_status.state == BALANCE_STATE_ACTIVE);
+
+  /* Charger gone: drop mid immediately (explicit present is authoritative). */
+  if (!s_status.charger_present && Balance_IsMidState(s_status.state))
+  {
+    Balance_LeaveMidToIdle(hi2c, BALANCE_INHIBIT_NOT_CHARGING);
+    Balance_ResetMidSession();
+    s_mid_session_active = false;
+    return;
+  }
+
+  if (s_status.discharge_detected && Balance_IsMidState(s_status.state))
+  {
+    Balance_LeaveMidToIdle(hi2c, BALANCE_INHIBIT_DISCHARGE);
+    return;
+  }
+
+  /* Mid-relax: pause only, no bleed. Wait for IR to fall, then classify. */
+  if (s_status.state == BALANCE_STATE_MID_RELAX)
+  {
+    if (s_status.top_start_ready && s_status.start_conditions_ok)
+    {
+      uint16_t mask;
+
+      Balance_ApplyChargeInhibit(false);
+      Balance_UpdateTopChargeInhibit(sample_stable);
+      Balance_UpdateChargerPath();
+      mask = Balance_SelectMask(s_status.cell_mv, s_status.vmin_mv,
+                                BMS_CELL_COUNT);
+      if (Balance_ApplyMask(hi2c, mask))
+      {
+        s_status.state = BALANCE_STATE_ACTIVE;
+        s_status.inhibit_reason = BALANCE_INHIBIT_NONE;
+      }
+      else
+      {
+        s_status.state = BALANCE_STATE_INHIBITED;
+        s_status.inhibit_reason = BALANCE_INHIBIT_COMM;
+      }
+      return;
+    }
+
+    if (s_status.mid_relax_count < 255U)
+    {
+      s_status.mid_relax_count++;
+    }
+
+    if (s_status.mid_relax_count < BALANCE_MID_RELAX_COUNT)
+    {
+      s_status.inhibit_reason = BALANCE_INHIBIT_MID_OBSERVE;
+      return;
+    }
+
+    Balance_ClassifyAfterRelax();
+
+    if (s_status.mid_class == BALANCE_MID_CLASS_REAL_THREAT)
+    {
+      if (!Balance_EnterMidProtect(hi2c))
+      {
+        Balance_StopAll(hi2c);
+        Balance_ApplyChargeInhibit(false);
+        s_status.state = BALANCE_STATE_INHIBITED;
+        s_status.inhibit_reason = BALANCE_INHIBIT_COMM;
+      }
+      return;
+    }
+
+    Balance_LeaveMidToIdle(hi2c, s_status.top_start_ready ?
+                           BALANCE_INHIBIT_DELTA_LOW :
+                           BALANCE_INHIBIT_TOP_NOT_READY);
+    return;
+  }
+
+  /* Mid-protect: short bleed of the highest cell until vmax leaves danger. */
+  if (s_status.state == BALANCE_STATE_MID_PROTECT)
+  {
+    if (s_status.top_start_ready && s_status.start_conditions_ok)
+    {
+      uint16_t mask;
+
+      Balance_UpdateTopChargeInhibit(sample_stable);
+      Balance_UpdateChargerPath();
+      mask = Balance_SelectMask(s_status.cell_mv, s_status.vmin_mv,
+                                BMS_CELL_COUNT);
+      if (Balance_ApplyMask(hi2c, mask))
+      {
+        s_status.state = BALANCE_STATE_ACTIVE;
+        s_status.inhibit_reason = BALANCE_INHIBIT_NONE;
+      }
+      else
+      {
+        Balance_StopAll(hi2c);
+        s_status.state = BALANCE_STATE_INHIBITED;
+        s_status.inhibit_reason = BALANCE_INHIBIT_COMM;
+      }
+      return;
+    }
+
+    if (s_status.mid_protect_count < 255U)
+    {
+      s_status.mid_protect_count++;
+    }
+
+    if ((s_status.vmax_mv <= BALANCE_MID_VMAX_SAFE_MV) ||
+        (s_status.mid_protect_count >= BALANCE_MID_PROTECT_MAX_TICKS))
+    {
+      s_status.mid_protect_cooldown = BALANCE_MID_PROTECT_COOLDOWN;
+      Balance_LeaveMidToIdle(hi2c, BALANCE_INHIBIT_NONE);
+      return;
+    }
+
+    {
+      uint16_t mask = Balance_SelectProtectMask(s_status.cell_mv,
+                                                s_status.vmax_mv,
+                                                BMS_CELL_COUNT);
+      (void)Balance_ApplyMask(hi2c, mask);
+    }
+
+    s_status.inhibit_reason = BALANCE_INHIBIT_MID_PROTECT;
+    return;
+  }
 
   if (s_status.state == BALANCE_STATE_ACTIVE)
   {
@@ -610,6 +960,9 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
       return;
     }
 
+    Balance_UpdateTopChargeInhibit(sample_stable);
+    Balance_UpdateChargerPath();
+
     {
       uint16_t mask = Balance_SelectMask(s_status.cell_mv, s_status.vmin_mv,
                                          BMS_CELL_COUNT);
@@ -621,8 +974,20 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
     return;
   }
 
-  /* Not ACTIVE: evaluate start path only. */
+  /* Not ACTIVE / mid: evaluate start path only. */
   Balance_StopAll(hi2c);
+
+  if (in_top_window)
+  {
+    Balance_UpdateTopChargeInhibit(sample_stable);
+    Balance_UpdateChargerPath();
+  }
+  else if (ChargePath_IsImbalanceChargeInhibit())
+  {
+    /* Mid-charge must not hold a leftover top Δ pause. */
+    Balance_ApplyChargeInhibit(false);
+    Balance_UpdateChargerPath();
+  }
 
   if (s_status.start_conditions_ok)
   {
@@ -639,8 +1004,16 @@ void Balance_Process(I2C_HandleTypeDef *hi2c)
       s_status.state = BALANCE_STATE_INHIBITED;
       s_status.inhibit_reason = BALANCE_INHIBIT_COMM;
     }
+    return;
   }
-  else if (!s_status.charger_active_stable)
+
+  if ((!in_top_window) && Balance_MidNeedRelax())
+  {
+    Balance_EnterMidRelax();
+    return;
+  }
+
+  if (!s_status.charger_active_stable)
   {
     s_status.state = BALANCE_STATE_WAIT_CHARGE;
     s_status.inhibit_reason = BALANCE_INHIBIT_NOT_CHARGING;

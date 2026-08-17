@@ -3,8 +3,9 @@
  * @file    cell_balance_manager.h
  * @brief   6S NMC passive cell balancing via BQ76942 CB_ACTIVE_CELLS.
  *
- * Charge-end balancing with start/hold hysteresis on delta, SOC/vmin, and
- * pack current. Call Balance_Process() from BmsTask (500 ms).
+ * Top-of-charge fine balance (40/15 mV) plus mid-charge highest-cell
+ * protect and IR-vs-real classify. Mid-charge does not chase alignment.
+ * Call Balance_Process() from BmsTask (500 ms).
  ******************************************************************************
  */
 #ifndef CELL_BALANCE_MANAGER_H
@@ -25,8 +26,9 @@ extern "C" {
 #define BALANCE_START_DELTA_MV           40U
 #define BALANCE_STOP_DELTA_MV            15U
 
-/* Charge pause on large imbalance (independent of balance 40/15).
- * Bench override: 300/250 so a ~283 mV pack can charge. Restore 50/30 for production. */
+/* Top-window charge pause only (independent of balance 40/15).
+ * Bench override: 300/250 so a ~283 mV pack can still top-balance.
+ * Restore 50/30 for production. Mid-charge does not use these. */
 #define CHARGE_IMBALANCE_STOP_DELTA_MV    300U
 #define CHARGE_IMBALANCE_RESUME_DELTA_MV  250U
 
@@ -56,13 +58,27 @@ extern "C" {
 
 #define BALANCE_COMM_FAIL_THRESHOLD           3U
 
+/* Mid-charge: protect highest cell + classify IR vs real. Not equalization. */
+#define BALANCE_MID_VMAX_WARN_MV           4000U
+#define BALANCE_MID_VMAX_DANGER_MV         4120U
+#define BALANCE_MID_VMAX_SAFE_MV           4080U
+#define BALANCE_MID_OBSERVE_DELTA_MV        150U
+#define BALANCE_MID_FAKE_SHRINK_MV           50U
+#define BALANCE_MID_REST_REAL_DELTA_MV       80U
+#define BALANCE_MID_RELAX_COUNT               6U  /* ~3 s @ 500 ms */
+#define BALANCE_MID_PROTECT_MAX_TICKS        60U  /* ~30 s bleed cap */
+#define BALANCE_MID_PROTECT_COOLDOWN         10U  /* ~5 s before re-enter */
+#define BALANCE_MID_PROTECT_NEAR_MV          20U
+
 typedef enum
 {
   BALANCE_STATE_DISABLED = 0,
   BALANCE_STATE_IDLE,
   BALANCE_STATE_WAIT_CHARGE,
   BALANCE_STATE_ACTIVE,
-  BALANCE_STATE_INHIBITED
+  BALANCE_STATE_INHIBITED,
+  BALANCE_STATE_MID_RELAX,
+  BALANCE_STATE_MID_PROTECT
 } balance_state_t;
 
 typedef enum
@@ -78,8 +94,18 @@ typedef enum
   BALANCE_INHIBIT_SAMPLE_UNSTABLE,
   BALANCE_INHIBIT_COMM,
   BALANCE_INHIBIT_BQ_PROTECT,
-  BALANCE_INHIBIT_DISCHARGE
+  BALANCE_INHIBIT_DISCHARGE,
+  BALANCE_INHIBIT_MID_OBSERVE,
+  BALANCE_INHIBIT_MID_PROTECT
 } balance_inhibit_reason_t;
+
+typedef enum
+{
+  BALANCE_MID_CLASS_NONE = 0,
+  BALANCE_MID_CLASS_FAKE_IR,
+  BALANCE_MID_CLASS_REAL_SAFE,
+  BALANCE_MID_CLASS_REAL_THREAT
+} balance_mid_class_t;
 
 typedef struct
 {
@@ -97,7 +123,7 @@ typedef struct
   bool discharge_detected;
   bool charger_active;
   bool charger_active_stable;
-  bool imbalance_charge_inhibit; /* Δ≥STOP pause charge; Δ≤RESUME clear */
+  bool imbalance_charge_inhibit; /* mid relax/protect or top Δ pause */
 
   bool start_conditions_ok;
   bool hold_conditions_ok;
@@ -117,6 +143,14 @@ typedef struct
   uint8_t stable_count;
   uint8_t charge_stable_count;
   uint8_t discharge_exit_count;
+
+  balance_mid_class_t mid_class;
+  bool mid_observe_done;
+  uint16_t mid_delta_at_pause_mv;
+  uint16_t mid_vmax_at_pause_mv;
+  uint8_t mid_relax_count;
+  uint8_t mid_protect_count;
+  uint8_t mid_protect_cooldown;
 } balance_status_t;
 
 void Balance_Init(void);
