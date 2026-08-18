@@ -702,23 +702,23 @@ void SoftStart_Process(void)
       break;
 
     case POSC_S3_12V:
-      s_posc.rail_12v_ok =
-          BSP_PowerRails_EnableRail(PWR_RAIL_12V, true) &&
-          BSP_PowerRails_WaitRailGood(PWR_RAIL_12V,
-                                      POSC_RAIL_PGOOD_TIMEOUT_MS);
-      if (s_posc.rail_12v_ok)
-      {
-        SoftStart_LogRailCurrents("after_12V");
-        if (s_posc.current_valid)
-        {
-          s_posc.current_after_12v_ma = s_posc.meas.current_ma;
-        }
-        s_posc.state = POSC_S4_OTHER;
-      }
-      else
+      /* 与 6.5V/19V 相同：EN 拉起失败才 FAULT。PA0 12V 分压在本板常读
+       * ~0 mV（raw=2），ADC 超时不能把整机卡死。 */
+      if (!BSP_PowerRails_EnableRail(PWR_RAIL_12V, true))
       {
         SoftStart_EnterFault();
+        break;
       }
+      s_posc.rail_12v_ok =
+          BSP_PowerRails_WaitRailGood(PWR_RAIL_12V,
+                                      POSC_RAIL_PGOOD_TIMEOUT_MS);
+      SoftStart_LogRailCurrents(s_posc.rail_12v_ok ? "after_12V" :
+                                "after_12V_adc");
+      if (s_posc.current_valid)
+      {
+        s_posc.current_after_12v_ma = s_posc.meas.current_ma;
+      }
+      s_posc.state = POSC_S4_OTHER;
       break;
 
     case POSC_S4_OTHER:

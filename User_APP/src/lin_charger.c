@@ -12,6 +12,7 @@
 #include "charge_manager.h"
 #include "charge_path.h"
 #include "cmsis_os2.h"
+#include "soft_start.h"
 
 #define LIN_SERIES_CELLS              6u
 
@@ -367,6 +368,19 @@ void LinCharger_Process(void)
   if (!s_lin.inited)
   {
     LinCharger_Init();
+  }
+
+  /* 322538b 缓启动后，桩常在 Ready 前完成 V/I（带 START）。
+   * Start() 当时失败则 session 停在 VI_OK，桩已 ACTIVE 只轮询 IDLE 并停充。
+   * Ready 后在任务上下文补一次 Start，不改缓启动步骤。 */
+  if (SoftStart_IsSystemReady() &&
+      (s_lin.session >= LIN_SESSION_VI_OK) &&
+      (ChargeManager_GetState() == CHARGE_STATE_IDLE))
+  {
+    if (ChargeManager_Start())
+    {
+      lin_set_session(LIN_SESSION_ACTIVE);
+    }
   }
 
   if (s_lin.session < LIN_SESSION_ACTIVE)
