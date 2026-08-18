@@ -52,6 +52,13 @@ typedef struct
   bool rail_19v_ok;
   bool rail_6v5_ok;
   bool rail_24v_ok; /* 本项目不用 24V，始终为 false */
+
+  /** PACK CC2 电流，mA（+充电 / −放电）。无分路传感器，用总电流差值估各轨。 */
+  int16_t current_before_ma;
+  int16_t current_after_12v_ma;
+  int16_t current_after_6v5_ma;
+  int16_t current_after_19v_ma;
+  bool current_valid;
 } posc_snapshot_t;
 
 void SoftStart_Init(void);

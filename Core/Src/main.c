@@ -27,6 +27,7 @@
 #include "bms_can_balance_tx.h"
 #include "bms_balance_rtt.h"
 #include "bsp_power_rails.h"
+#include "bsp_adc_rails.h"
 #include "bms_lin_config.h"
 #include "lin_driver.h"
 #include "SEGGER_RTT.h"
@@ -83,7 +84,11 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+int __io_putchar(int ch)
+{
+  (void)SEGGER_RTT_PutChar(0U, (char)ch);
+  return ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -94,7 +99,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  SEGGER_RTT_Init();
+  (void)SEGGER_RTT_WriteString(0U, "\r\n[BMS] RTT ready\r\n");
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -121,6 +127,7 @@ int main(void)
   BSP_PowerRails_PreBoot();
   MX_GPDMA1_Init();
   MX_ADC1_Init();
+  (void)BSP_AdcRails_Init();
   MX_I2C2_Init();
   MX_FDCAN1_Init();
   MX_TIM2_Init();

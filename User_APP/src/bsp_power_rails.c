@@ -5,6 +5,7 @@
  ******************************************************************************
  */
 #include "bsp_power_rails.h"
+#include "bsp_adc_rails.h"
 #include "bsp_fan.h"
 #include "bq76942.h"
 #include "charge_path.h"
@@ -722,27 +723,41 @@ bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on)
 
 bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms)
 {
-  const uint32_t settle_ms = 300U;
+  const uint32_t poll_ms = 10U;
+  const uint8_t confirm_needed = 3U;
   uint32_t elapsed = 0U;
+  uint8_t confirm = 0U;
 
   if ((rail >= PWR_RAIL_COUNT) || !s_pwr_rails_status.rail_on[rail])
   {
     return false;
   }
 
-  while (elapsed < settle_ms)
+  if (!BSP_AdcRails_IsReady())
   {
-    if (elapsed >= timeout_ms)
-    {
-      return false;
-    }
-
-    osDelay(10U);
-    elapsed += 10U;
+    return false;
   }
 
-  /* 预留：后续在此读取 12V/19V PGOOD GPIO 或 ADC。 */
-  return true;
+  while (elapsed < timeout_ms)
+  {
+    if (BSP_AdcRails_IsRailGood(rail))
+    {
+      confirm++;
+      if (confirm >= confirm_needed)
+      {
+        return true;
+      }
+    }
+    else
+    {
+      confirm = 0U;
+    }
+
+    osDelay(poll_ms);
+    elapsed += poll_ms;
+  }
+
+  return false;
 }
 
 void BSP_PowerRails_SetBootComplete(bool complete)

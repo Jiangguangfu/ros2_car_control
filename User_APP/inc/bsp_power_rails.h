@@ -102,7 +102,7 @@ void BSP_PowerRails_PreBoot(void);
 void BSP_PowerRails_BootSequence(void);
 /** 逐步使能单路电源轨（更新 rail_on / enabled_mask）。 */
 bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on);
-/** 等待 PGOOD（当前为稳定延时；后续可接 GPIO/ADC）。 */
+/** 等待电源轨 ADC 电压达到阈值（连续 3 次采样确认）。 */
 bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms);
 /** ServiceTask 上电序列完成后置 true，Init/Process 才接管轨控。 */
 void BSP_PowerRails_SetBootComplete(bool complete);

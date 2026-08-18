@@ -137,6 +137,14 @@ SECTIONS
   /* Used by the startup to initialize data */
   _sidata = LOADADDR(.data);
 
+  /* RTT 控制块放在 RAM 起始，便于 J-Link 扫描 "SEGGER RTT" */
+  .rtt (NOLOAD) :
+  {
+    . = ALIGN(16);
+    KEEP(*(.rtt))
+    . = ALIGN(16);
+  } >RAM
+
   /* Initialized data sections into "RAM" Ram type memory */
   .data :
   {

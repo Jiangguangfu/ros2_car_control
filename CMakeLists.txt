@@ -50,6 +50,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/app_freertos.c
     User_APP/src/soft_start.c
+    User_APP/src/SEGGER_RTT.c
     User_APP/src/bms_can_tx.c
     User_APP/src/bms_can_ext_tx.c
     User_APP/src/bms_can_balance_tx.c
@@ -63,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/bq76942.c
     User_APP/src/bsp_fan.c
     User_APP/src/bsp_power_rails.c
+    User_APP/src/bsp_adc_rails.c
     User_APP/src/cell_balance_manager.c
     User_APP/src/charge_path.c
     User_APP/src/charge_manager.c

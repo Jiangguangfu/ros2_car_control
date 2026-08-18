@@ -7,9 +7,12 @@
 #include "soft_start.h"
 
 #include "bsp_power_rails.h"
+#include "bsp_adc_rails.h"
 #include "charge_path.h"
 #include "cmsis_os2.h"
+#include "SEGGER_RTT.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define POSC_PACK_STACK_DELTA_MV          500U
@@ -32,6 +35,119 @@ static volatile bool s_system_ready;
 static volatile bool s_boot_fault;
 static bool s_bq_calibrated;
 static posc_snapshot_t s_posc;
+static int16_t s_current_prev_ma;
+
+static void SoftStart_LogPuts(const char *s)
+{
+  (void)SEGGER_RTT_WriteString(0U, s);
+}
+
+static bool SoftStart_ReadPackCurrent(int16_t *current_ma)
+{
+  uint8_t retry;
+
+  for (retry = 0U; retry < POSC_I2C_RETRY_COUNT; retry++)
+  {
+    if (BQ76942_ReadPackCurrent(&hi2c2, current_ma))
+    {
+      s_posc.meas.current_ma = *current_ma;
+      s_posc.current_valid = true;
+      return true;
+    }
+
+    if ((retry + 1U) < POSC_I2C_RETRY_COUNT)
+    {
+      osDelay(POSC_I2C_RETRY_DELAY_MS);
+    }
+  }
+
+  return false;
+}
+
+/** 打印 PACK 总电流、各轨 ADC 电压与 EN 状态；dI 为相对上一次采样的差值。 */
+static void SoftStart_LogRailCurrents(const char *phase)
+{
+  int16_t pack_ma = 0;
+  int16_t delta_ma = 0;
+  char line[280];
+  const pwr_rails_status_t *pwr = BSP_PowerRails_GetStatus();
+  const adc_rails_status_t *adc = BSP_AdcRails_GetStatus();
+  bool i_ok = SoftStart_ReadPackCurrent(&pack_ma);
+  uint32_t v12_mv = 0U;
+  uint32_t v19_mv = 0U;
+  uint32_t v75_mv = 0U;
+  uint32_t v24_mv = 0U;
+  uint32_t i5_ma = 0U;
+  uint16_t raw[BSP_ADC_CHANNEL_COUNT] = {0};
+  uint8_t on_12v = 0U;
+  uint8_t on_19v = 0U;
+  uint8_t on_6v5 = 0U;
+  uint8_t on_24v = 0U;
+  uint8_t i;
+
+  BSP_AdcRails_Update();
+  adc = BSP_AdcRails_GetStatus();
+
+  if ((adc != NULL) && adc->ready)
+  {
+    v12_mv = adc->rail_mv[PWR_RAIL_12V];
+    v19_mv = adc->rail_mv[PWR_RAIL_19V];
+    v75_mv = adc->rail_mv[PWR_RAIL_6V5];
+    v24_mv = adc->rail_mv[PWR_RAIL_24V];
+    i5_ma = adc->i5v_ma;
+    for (i = 0U; i < BSP_ADC_CHANNEL_COUNT; i++)
+    {
+      raw[i] = adc->channel_raw[i];
+    }
+  }
+
+  if (pwr != NULL)
+  {
+    on_12v = pwr->rail_on[PWR_RAIL_12V] ? 1U : 0U;
+    on_19v = pwr->rail_on[PWR_RAIL_19V] ? 1U : 0U;
+    on_6v5 = pwr->rail_on[PWR_RAIL_6V5] ? 1U : 0U;
+    on_24v = pwr->rail_on[PWR_RAIL_24V] ? 1U : 0U;
+  }
+
+  if (i_ok)
+  {
+    delta_ma = (int16_t)(pack_ma - s_current_prev_ma);
+    s_current_prev_ma = pack_ma;
+    (void)snprintf(line, sizeof(line),
+                   "[POSC] %s Ipack=%d mA dI=%d mA "
+                   "V12=%lu V19=%lu V75=%lu V24=%lu mV I5=%lu mA "
+                   "EN12=%u EN19=%u EN6V5=%u EN24=%u "
+                   "raw=%u,%u,%u,%u,%u,%u,%u,%u,%u\r\n",
+                   phase, (int)pack_ma, (int)delta_ma,
+                   (unsigned long)v12_mv, (unsigned long)v19_mv,
+                   (unsigned long)v75_mv, (unsigned long)v24_mv,
+                   (unsigned long)i5_ma,
+                   (unsigned)on_12v, (unsigned)on_19v,
+                   (unsigned)on_6v5, (unsigned)on_24v,
+                   (unsigned)raw[0], (unsigned)raw[1], (unsigned)raw[2],
+                   (unsigned)raw[3], (unsigned)raw[4], (unsigned)raw[5],
+                   (unsigned)raw[6], (unsigned)raw[7], (unsigned)raw[8]);
+  }
+  else
+  {
+    (void)snprintf(line, sizeof(line),
+                   "[POSC] %s Ipack=NA "
+                   "V12=%lu V19=%lu V75=%lu V24=%lu mV I5=%lu mA "
+                   "EN12=%u EN19=%u EN6V5=%u EN24=%u "
+                   "raw=%u,%u,%u,%u,%u,%u,%u,%u,%u\r\n",
+                   phase,
+                   (unsigned long)v12_mv, (unsigned long)v19_mv,
+                   (unsigned long)v75_mv, (unsigned long)v24_mv,
+                   (unsigned long)i5_ma,
+                   (unsigned)on_12v, (unsigned)on_19v,
+                   (unsigned)on_6v5, (unsigned)on_24v,
+                   (unsigned)raw[0], (unsigned)raw[1], (unsigned)raw[2],
+                   (unsigned)raw[3], (unsigned)raw[4], (unsigned)raw[5],
+                   (unsigned)raw[6], (unsigned)raw[7], (unsigned)raw[8]);
+  }
+
+  SoftStart_LogPuts(line);
+}
 
 static bool SoftStart_TempValid(int16_t t_c_x10)
 {
@@ -76,8 +192,11 @@ void SoftStart_Init(void)
   s_boot_fault = false;
   s_bq_calibrated = false;
   s_posc.rail_24v_ok = false;
+  s_posc.current_valid = false;
+  s_current_prev_ma = 0;
   (void)BSP_PowerRails_EnableRail(PWR_RAIL_24V, false);
   ChargePath_Init();
+  SoftStart_LogPuts("[POSC] boot start\r\n");
 }
 
 /** 更新 FET 快照；读失败时保留上次 fet_status，不清零。 */
@@ -510,6 +629,8 @@ static void SoftStart_EnterFault(void)
   s_posc.state = POSC_FAULT;
   s_boot_fault = true;
   s_system_ready = false;
+  /* 先打日志再关轨，否则 19V 电压已经掉下去了。 */
+  SoftStart_LogRailCurrents("fault");
   ChargePath_SetBootDischargeInhibit(true);
   ChargePath_Apply();
   s_posc.rail_24v_ok = false;
@@ -530,6 +651,11 @@ static void SoftStart_EnterReady(void)
   ChargePath_SetBootDischargeInhibit(false);
   ChargePath_Apply();
   BSP_PowerRails_SetBootComplete(true);
+  SoftStart_LogRailCurrents("after");
+  if (s_posc.current_valid)
+  {
+    s_posc.current_after_19v_ma = s_posc.meas.current_ma;
+  }
 }
 
 void SoftStart_Process(void)
@@ -539,6 +665,11 @@ void SoftStart_Process(void)
     case POSC_S0_SELF_CHECK:
       if (SoftStart_S0())
       {
+        SoftStart_LogRailCurrents("before");
+        if (s_posc.current_valid)
+        {
+          s_posc.current_before_ma = s_posc.meas.current_ma;
+        }
         s_posc.state = POSC_S1_PDSG;
       }
       else
@@ -561,6 +692,7 @@ void SoftStart_Process(void)
     case POSC_S2_DSG:
       if (SoftStart_S2())
       {
+        SoftStart_LogRailCurrents("after_dsg");
         s_posc.state = POSC_S3_12V;
       }
       else
@@ -576,6 +708,11 @@ void SoftStart_Process(void)
                                       POSC_RAIL_PGOOD_TIMEOUT_MS);
       if (s_posc.rail_12v_ok)
       {
+        SoftStart_LogRailCurrents("after_12V");
+        if (s_posc.current_valid)
+        {
+          s_posc.current_after_12v_ma = s_posc.meas.current_ma;
+        }
         s_posc.state = POSC_S4_OTHER;
       }
       else
@@ -585,32 +722,38 @@ void SoftStart_Process(void)
       break;
 
     case POSC_S4_OTHER:
-      s_posc.rail_6v5_ok = BSP_PowerRails_EnableRail(PWR_RAIL_6V5, true);
-      BSP_PowerRails_WaitRailGood(PWR_RAIL_6V5,
-                                  POSC_RAIL_PGOOD_TIMEOUT_MS);
-      if (s_posc.rail_6v5_ok)
-      {
-        s_posc.state = POSC_S5_19V;
-      }
-      else
+      /* 6.5V 灯/输出已确认能起来；PA6 分压通道尚未按 DMA 对齐后的 raw 标定，
+       * ADC 超时只记日志，不进 FAULT，避免卡在 S4。 */
+      if (!BSP_PowerRails_EnableRail(PWR_RAIL_6V5, true))
       {
         SoftStart_EnterFault();
+        break;
       }
+      s_posc.rail_6v5_ok =
+          BSP_PowerRails_WaitRailGood(PWR_RAIL_6V5,
+                                      POSC_RAIL_PGOOD_TIMEOUT_MS);
+      SoftStart_LogRailCurrents(s_posc.rail_6v5_ok ? "after_6V5" :
+                                "after_6V5_adc");
+      if (s_posc.current_valid)
+      {
+        s_posc.current_after_6v5_ma = s_posc.meas.current_ma;
+      }
+      s_posc.state = POSC_S5_19V;
       break;
 
     case POSC_S5_19V:
-      s_posc.rail_19v_ok =
-          BSP_PowerRails_EnableRail(PWR_RAIL_19V, true) &&
-          BSP_PowerRails_WaitRailGood(PWR_RAIL_19V,
-                                      POSC_RAIL_PGOOD_TIMEOUT_MS);
-      if (s_posc.rail_19v_ok)
-      {
-        SoftStart_EnterReady();
-      }
-      else
+      /* 19V 灯已能亮；ADC 分压/通道尚未按对齐后的 raw 标定，超时不关轨。 */
+      if (!BSP_PowerRails_EnableRail(PWR_RAIL_19V, true))
       {
         SoftStart_EnterFault();
+        break;
       }
+      s_posc.rail_19v_ok =
+          BSP_PowerRails_WaitRailGood(PWR_RAIL_19V,
+                                      POSC_RAIL_PGOOD_TIMEOUT_MS);
+      SoftStart_LogRailCurrents(s_posc.rail_19v_ok ? "after_19V" :
+                                "after_19V_adc");
+      SoftStart_EnterReady();
       break;
 
     case POSC_READY:

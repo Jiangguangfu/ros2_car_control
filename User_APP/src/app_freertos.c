@@ -30,6 +30,7 @@
 #include "charge_manager.h"
 #include "cell_voltage_protect.h"
 #include "bsp_power_rails.h"
+#include "bsp_adc_rails.h"
 #include "bms_can_tx.h"
 #include "bms_can_debug.h"
 #include "bms_can_ext_tx.h"
@@ -305,6 +306,7 @@ void StartPowerTask(void *argument)
   {
     if (SoftStart_IsSystemReady())
     {
+      BSP_AdcRails_Update();
       BSP_PowerRails_Process();
       ChargePath_Apply();
     }
