@@ -13,45 +13,38 @@
 #define BSP_ADC_VREF_MV           3300U
 #define BSP_ADC_MAX_RAW           4095U
 
-/* DMA Rank 索引（0-based，与 MX_ADC1_Init Rank 顺序一致）
- * 12V/24V 按实测对调：PA0 raw≈3176 → 12V≈11.1V；PA2 raw=0 → 24V 关闭。
- */
-#define BSP_ADC_IDX_12V           0U  /* PA0 IN3 12V 分压 100k/30k */
-#define BSP_ADC_IDX_19V           1U  /* PA1 IN4 19V 分压 100k/20k */
-#define BSP_ADC_IDX_24V           2U  /* PA2 IN5 24V 分压 200k/20k */
-#define BSP_ADC_IDX_5V            3U  /* PA3 IN6 ADC_M_5V 电流     */
-#define BSP_ADC_IDX_7V5           8U  /* PB2 IN15 Rank9：实测 raw≈2046，不是 PA6 */
+/* DMA Rank 索引（0-based，与 MX_ADC1_Init Rank 顺序一致） */
+#define BSP_ADC_IDX_24V_I         0U  /* PA0 IN3  ADC_M_24V_O1 电流 */
+#define BSP_ADC_IDX_19V_I         1U  /* PA1 IN4  ADC_M_19V_O1 电流 */
+#define BSP_ADC_IDX_12V_I         2U  /* PA2 IN5  ADC_M_12V_O1 电流（遥测） */
+#define BSP_ADC_IDX_5V_I          3U  /* PA3 IN6  ADC_M_5V 电流 */
+#define BSP_ADC_IDX_7V5_I         4U  /* PA6 IN9  ADC_M_7.5V_O1 电流（遥测） */
+#define BSP_ADC_IDX_7V5_V         5U  /* PA7 IN10 +7.5V_OUT3_V 电压 */
+#define BSP_ADC_IDX_12V_V         6U  /* PB0 IN13 +12V_OUT2_V 电压 */
 
 /*
  * 电压：Vrail_mV = raw * VREF * (Rtop + Rbot) / (ADC_MAX * Rbot)
  *
- *   12V  PA0 Rank1  Rtop=100k Rbot=30k  → 13/3
- *   19V  PA1 Rank2  Rtop=100k Rbot=20k  → 6/1
- *   24V  PA2 Rank3  Rtop=200k Rbot=20k  → 11/1
- *   6.5V PB2 Rank9  丝印在 PA6，实测 PA6=0、Rank9 raw≈2046、Vpin≈1.65V → 4/1
+ *   12V  PB0 IN13 R104=120k / R102=20k → 7/1
+ *   6.5V PA7 IN10 R49=40k / R105=10k   → 5/1
+ *   19V/24V 无分压通道，不换算电压。
  */
-#define BSP_ADC_DIV_24_NUM        11U
-#define BSP_ADC_DIV_24_DEN         1U
-#define BSP_ADC_DIV_19_NUM         6U
-#define BSP_ADC_DIV_19_DEN         1U
-#define BSP_ADC_DIV_12_NUM        13U
-#define BSP_ADC_DIV_12_DEN         3U
-#define BSP_ADC_DIV_6V5_NUM        4U
+#define BSP_ADC_DIV_12_NUM         7U
+#define BSP_ADC_DIV_12_DEN         1U
+#define BSP_ADC_DIV_6V5_NUM        5U
 #define BSP_ADC_DIV_6V5_DEN        1U
 
 /*
- * 5V 电流：ADC_M_5V ← INA180A2IDBVT（Gain=50）× Rshunt=10 mΩ
+ * 电流：INA180A2（Gain=50）× Rshunt=10 mΩ
  * I_mA = Vadc_mV * 1000 / (Rshunt_mOhm * Gain) = Vadc_mV * 2
- * 原理图 R4 标 "3A 10m-30m"，与 24V 侧 R7=10 mΩ 对齐，暂按 10 mΩ。
  */
 #define BSP_ADC_INA180_GAIN       50U
-#define BSP_ADC_5V_SHUNT_MOHM     10U
+#define BSP_ADC_SHUNT_MOHM        10U
 
-/* 90% 标称电压作为 Good 阈值（mV） */
-#define BSP_ADC_GOOD_24V_MV      21600U
-#define BSP_ADC_GOOD_19V_MV      17100U
+/* 12V/6.5V：90% 标称电压；19V/24V：输出电流。 */
 #define BSP_ADC_GOOD_12V_MV      10800U
 #define BSP_ADC_GOOD_6V5_MV       5850U
+#define BSP_ADC_GOOD_CURRENT_MA     50U
 
 typedef struct
 {
@@ -60,41 +53,39 @@ typedef struct
   uint32_t scale_num;
   uint32_t scale_den;
   uint32_t good_min_mv;
-} adc_rail_map_t;
+} adc_volt_map_t;
+
+typedef struct
+{
+  pwr_rail_id_t rail;
+  uint8_t buf_idx;
+} adc_curr_map_t;
 
 extern ADC_HandleTypeDef hadc1;
 
 /*
  * GPDMA 配置为半字传输（Src/Dest = HALFWORD，dest 每次 +2）。
- * 必须用 uint16_t[9]：若用 uint32_t[9]，19V/6.5V 会读到错位的 Rank。
+ * 必须用 uint16_t[9]：若用 uint32_t[9]，会读到错位的 Rank。
  */
 static uint16_t s_adc_dma_buf[BSP_ADC_CHANNEL_COUNT] __attribute__((aligned(4)));
 static adc_rails_status_t s_adc_status;
 
-static const adc_rail_map_t s_rail_map[] =
+static const adc_volt_map_t s_volt_map[] =
 {
-  /* 本项目不开 24V，仍换算电压供监测；不参与 WaitRailGood */
-  { PWR_RAIL_24V, BSP_ADC_IDX_24V, BSP_ADC_DIV_24_NUM, BSP_ADC_DIV_24_DEN, 0U },
-  { PWR_RAIL_19V, BSP_ADC_IDX_19V, BSP_ADC_DIV_19_NUM, BSP_ADC_DIV_19_DEN,
-    BSP_ADC_GOOD_19V_MV },
-  { PWR_RAIL_12V, BSP_ADC_IDX_12V, BSP_ADC_DIV_12_NUM, BSP_ADC_DIV_12_DEN,
+  { PWR_RAIL_12V, BSP_ADC_IDX_12V_V, BSP_ADC_DIV_12_NUM, BSP_ADC_DIV_12_DEN,
     BSP_ADC_GOOD_12V_MV },
-  { PWR_RAIL_6V5, BSP_ADC_IDX_7V5, BSP_ADC_DIV_6V5_NUM, BSP_ADC_DIV_6V5_DEN,
+  { PWR_RAIL_6V5, BSP_ADC_IDX_7V5_V, BSP_ADC_DIV_6V5_NUM, BSP_ADC_DIV_6V5_DEN,
     BSP_ADC_GOOD_6V5_MV },
 };
 
-static const adc_rail_map_t *AdcRails_FindMap(pwr_rail_id_t rail)
+static const adc_curr_map_t s_curr_map[] =
 {
-  for (uint32_t i = 0U; i < (sizeof(s_rail_map) / sizeof(s_rail_map[0])); i++)
-  {
-    if (s_rail_map[i].rail == rail)
-    {
-      return &s_rail_map[i];
-    }
-  }
-
-  return NULL;
-}
+  { PWR_RAIL_12V, BSP_ADC_IDX_12V_I },
+  { PWR_RAIL_19V, BSP_ADC_IDX_19V_I },
+  { PWR_RAIL_24V, BSP_ADC_IDX_24V_I },
+  { PWR_RAIL_5V,  BSP_ADC_IDX_5V_I  },
+  { PWR_RAIL_6V5, BSP_ADC_IDX_7V5_I },
+};
 
 static uint16_t AdcRails_ReadRaw(uint8_t buf_idx)
 {
@@ -104,12 +95,6 @@ static uint16_t AdcRails_ReadRaw(uint8_t buf_idx)
   }
 
   return (uint16_t)(s_adc_dma_buf[buf_idx] & 0x0FFFU);
-}
-
-static uint32_t AdcRails_RawToPinMv(uint16_t raw)
-{
-  return (uint32_t)(((uint64_t)raw * (uint64_t)BSP_ADC_VREF_MV) /
-                    (uint64_t)BSP_ADC_MAX_RAW);
 }
 
 static uint32_t AdcRails_RawToRailMv(uint16_t raw, uint32_t scale_num,
@@ -126,22 +111,29 @@ static uint32_t AdcRails_RawToRailMv(uint16_t raw, uint32_t scale_num,
   return (uint32_t)(num / ((uint64_t)BSP_ADC_MAX_RAW * (uint64_t)scale_den));
 }
 
-static uint32_t AdcRails_RawTo5VCurrentMa(uint16_t raw)
+static uint32_t AdcRails_RawToShuntCurrentMa(uint16_t raw)
 {
-  uint32_t pin_mv = AdcRails_RawToPinMv(raw);
-  uint32_t den = BSP_ADC_5V_SHUNT_MOHM * BSP_ADC_INA180_GAIN;
+  uint32_t den = BSP_ADC_SHUNT_MOHM * BSP_ADC_INA180_GAIN;
+  uint64_t num;
+  uint64_t div;
 
   if (den == 0U)
   {
     return 0U;
   }
 
-  return (pin_mv * 1000U) / den;
+  /* I_mA = raw * VREF_mV * 1000 / (ADC_MAX * Rshunt_mOhm * Gain)
+   * 一次算完并四舍五入。若先算 pin_mV 再 ×2，raw=2 会变成 2 mA（应为 3.22 mA）。
+   */
+  div = (uint64_t)BSP_ADC_MAX_RAW * (uint64_t)den;
+  num = (uint64_t)raw * (uint64_t)BSP_ADC_VREF_MV * 1000ULL;
+  return (uint32_t)((num + (div / 2ULL)) / div);
 }
 
 static void AdcRails_RefreshStatus(void)
 {
   uint8_t ch;
+  uint32_t i;
 
   if (!s_adc_status.ready)
   {
@@ -153,22 +145,28 @@ static void AdcRails_RefreshStatus(void)
     s_adc_status.channel_raw[ch] = AdcRails_ReadRaw(ch);
   }
 
-  for (uint8_t i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
+  for (i = 0U; i < (uint32_t)PWR_RAIL_COUNT; i++)
   {
     s_adc_status.rail_mv[i] = 0U;
+    s_adc_status.rail_ma[i] = 0U;
   }
 
-  for (uint32_t i = 0U; i < (sizeof(s_rail_map) / sizeof(s_rail_map[0])); i++)
+  for (i = 0U; i < (sizeof(s_volt_map) / sizeof(s_volt_map[0])); i++)
   {
-    const adc_rail_map_t *map = &s_rail_map[i];
+    const adc_volt_map_t *map = &s_volt_map[i];
     uint16_t raw = s_adc_status.channel_raw[map->buf_idx];
 
     s_adc_status.rail_mv[map->rail] =
         AdcRails_RawToRailMv(raw, map->scale_num, map->scale_den);
   }
 
-  s_adc_status.i5v_ma =
-      AdcRails_RawTo5VCurrentMa(s_adc_status.channel_raw[BSP_ADC_IDX_5V]);
+  for (i = 0U; i < (sizeof(s_curr_map) / sizeof(s_curr_map[0])); i++)
+  {
+    const adc_curr_map_t *map = &s_curr_map[i];
+    uint16_t raw = s_adc_status.channel_raw[map->buf_idx];
+
+    s_adc_status.rail_ma[map->rail] = AdcRails_RawToShuntCurrentMa(raw);
+  }
 }
 
 bool BSP_AdcRails_Init(void)
@@ -215,7 +213,9 @@ const adc_rails_status_t *BSP_AdcRails_GetStatus(void)
 
 uint32_t BSP_AdcRails_GetRailMv(pwr_rail_id_t rail)
 {
-  if (!s_adc_status.ready || (rail >= PWR_RAIL_COUNT))
+  if (!s_adc_status.ready || (rail >= PWR_RAIL_COUNT) ||
+      (rail == PWR_RAIL_19V) || (rail == PWR_RAIL_24V) ||
+      (rail == PWR_RAIL_5V))
   {
     return 0U;
   }
@@ -223,18 +223,41 @@ uint32_t BSP_AdcRails_GetRailMv(pwr_rail_id_t rail)
   return s_adc_status.rail_mv[rail];
 }
 
+uint32_t BSP_AdcRails_GetRailMa(pwr_rail_id_t rail)
+{
+  if (!s_adc_status.ready || (rail >= PWR_RAIL_COUNT))
+  {
+    return 0U;
+  }
+
+  return s_adc_status.rail_ma[rail];
+}
+
 bool BSP_AdcRails_IsRailGood(pwr_rail_id_t rail)
 {
-  const adc_rail_map_t *map = AdcRails_FindMap(rail);
-  uint32_t mv;
+  uint32_t i;
 
   AdcRails_RefreshStatus();
 
-  if (!s_adc_status.ready || (map == NULL) || (map->good_min_mv == 0U))
+  if (!s_adc_status.ready)
   {
     return false;
   }
 
-  mv = s_adc_status.rail_mv[rail];
-  return mv >= map->good_min_mv;
+  /* 12V / 6.5V：有分压，用电压判断。 */
+  for (i = 0U; i < (sizeof(s_volt_map) / sizeof(s_volt_map[0])); i++)
+  {
+    if (s_volt_map[i].rail == rail)
+    {
+      return s_adc_status.rail_mv[rail] >= s_volt_map[i].good_min_mv;
+    }
+  }
+
+  /* 19V / 24V：无电压采样，用电流判断。 */
+  if ((rail == PWR_RAIL_19V) || (rail == PWR_RAIL_24V))
+  {
+    return s_adc_status.rail_ma[rail] >= BSP_ADC_GOOD_CURRENT_MA;
+  }
+
+  return false;
 }

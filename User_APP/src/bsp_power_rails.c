@@ -39,7 +39,7 @@
 #define PWR_RAILS_ENABLE_ALL_EXCEPT_19V \
   ((uint8_t)(PWR_MASK_ALL & ~PWR_MASK_19V))
 
-/* FAULT: 本项目不用 24V，故障时全部电源轨关闭。 */
+/* FAULT: 全部电源轨关闭。 */
 #define PWR_RAILS_FAULT_FAN_ENABLE \
   ((uint8_t)0U)
 
@@ -83,8 +83,8 @@ static void PowerRails_WriteGpio(pwr_rail_id_t rail, bool on)
   switch (rail)
   {
     case PWR_RAIL_24V:
-      (void)level;
-      PowerRails_Hold24VOff();
+      HAL_GPIO_WritePin(PWR_24V_BYPASS_EN_GPIO_Port, PWR_24V_BYPASS_EN_Pin,
+                        level);
       break;
     case PWR_RAIL_19V:
       HAL_GPIO_WritePin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin, level);
@@ -109,12 +109,6 @@ static void PowerRails_DriveMask(uint8_t enable_mask)
   for (i = 0U; i < (uint8_t)PWR_RAIL_COUNT; i++)
   {
     bool on;
-
-    if (i == (uint8_t)PWR_RAIL_24V)
-    {
-      PowerRails_Hold24VOff();
-      continue;
-    }
 
     if (i == (uint8_t)PWR_RAIL_5V)
     {
@@ -687,12 +681,6 @@ bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on)
     return false;
   }
 
-  if (rail == PWR_RAIL_24V)
-  {
-    PowerRails_Hold24VOff();
-    return !on;
-  }
-
   if (rail == PWR_RAIL_5V)
   {
     s_pwr_rails_status.rail_on[PWR_RAIL_5V] =
@@ -725,6 +713,7 @@ bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms)
 {
   const uint32_t poll_ms = 10U;
   const uint8_t confirm_needed = 3U;
+  const uint32_t current_settle_ms = 300U;
   uint32_t elapsed = 0U;
   uint8_t confirm = 0U;
 
@@ -736,6 +725,17 @@ bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms)
   if (!BSP_AdcRails_IsReady())
   {
     return false;
+  }
+
+  /* 19V/24V 靠电流判断：跳过上电浪涌后再采稳态，避免空载误判到位。 */
+  if ((rail == PWR_RAIL_19V) || (rail == PWR_RAIL_24V))
+  {
+    if (timeout_ms <= current_settle_ms)
+    {
+      return false;
+    }
+    osDelay(current_settle_ms);
+    timeout_ms -= current_settle_ms;
   }
 
   while (elapsed < timeout_ms)

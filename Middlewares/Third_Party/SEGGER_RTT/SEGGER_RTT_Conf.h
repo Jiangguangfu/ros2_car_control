@@ -107,6 +107,10 @@ Revision: $Rev: 24316 $
   #define SEGGER_RTT_MODE_DEFAULT                   SEGGER_RTT_MODE_NO_BLOCK_SKIP // Mode for pre-initialized terminal channel (buffer 0)
 #endif
 
+#ifndef   SEGGER_RTT_SECTION
+  #define SEGGER_RTT_SECTION                        ".rtt"  /* 与链接脚本 RAM 起始 .rtt 段对齐，便于 J-Link 扫描 */
+#endif
+
 /*********************************************************************
 *
 *       RTT memcpy configuration

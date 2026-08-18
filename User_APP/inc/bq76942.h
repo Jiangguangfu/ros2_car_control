@@ -5,7 +5,7 @@
  *
  * Schematic (BQ76942PBR):
  *   TS1 — NTC (protect); TS2 — NTC (report only); TS3 — SW2
- *   PC13 PWR_24V_BYPASS_EN 本项目不用，始终关闭；BQ_DFETOFF / FET 由 charge_path 管理
+ *   PC13 PWR_24V_BYPASS_EN 由缓启动 S1 打开；BQ_DFETOFF / FET 由 charge_path 管理
  ******************************************************************************
  */
 #ifndef BQ76942_H

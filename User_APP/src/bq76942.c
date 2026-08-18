@@ -1149,7 +1149,7 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
     return false;
   }
 
-  /* 24V bypass unused. DFETOFF owned by charge_path. */
+  /* DFETOFF owned by charge_path. */
   if (!BQ76942_EnsureFetsEnabled(hi2c))
   {
     goto out;
