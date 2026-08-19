@@ -22,7 +22,15 @@ extern "C" {
 #define VOLTPROT_LOW_WARN_MV              3300U
 #endif
 #ifndef VOLTPROT_LOW_WARN_CLEAR_MV
-#define VOLTPROT_LOW_WARN_CLEAR_MV        3350U
+#define VOLTPROT_LOW_WARN_CLEAR_MV        3450U
+#endif
+/** 进出预警连续确认次数（BmsTask 500 ms × 3 ≈ 1.5 s），避免负载抖动误报。 */
+#ifndef VOLTPROT_LOW_WARN_DEBOUNCE
+#define VOLTPROT_LOW_WARN_DEBOUNCE          3U
+#endif
+/** 低于该值视为断线/掉电采样，不当成低电量（避免断电瞬间误报警）。 */
+#ifndef VOLTPROT_CELL_VALID_MIN_MV
+#define VOLTPROT_CELL_VALID_MIN_MV         2500U
 #endif
 
 typedef enum

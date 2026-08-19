@@ -15,6 +15,8 @@ static bool s_low_voltage_warn;
 static bool s_charge_inhibit;
 static bool s_discharge_inhibit;
 static bool s_valid;
+static uint8_t s_warn_enter_count;
+static uint8_t s_warn_clear_count;
 
 void CellVoltageProtect_Init(void)
 {
@@ -26,6 +28,8 @@ void CellVoltageProtect_Init(void)
   s_charge_inhibit = false;
   s_discharge_inhibit = false;
   s_valid = false;
+  s_warn_enter_count = 0U;
+  s_warn_clear_count = 0U;
   ChargePath_SetVoltageInhibit(false, false);
 }
 
@@ -61,13 +65,47 @@ void CellVoltageProtect_Process(uint8_t status_a, bool bq_valid,
 
   if (meas_valid)
   {
-    if (meas->vcell_min_mv <= VOLTPROT_LOW_WARN_MV)
+    /* 掉电/断线瞬间电芯电压会塌到接近 0，不能当低电量。 */
+    if (meas->vcell_min_mv < VOLTPROT_CELL_VALID_MIN_MV)
     {
-      s_low_voltage_warn = true;
+      s_warn_enter_count = 0U;
+      if (s_warn_clear_count < VOLTPROT_LOW_WARN_DEBOUNCE)
+      {
+        s_warn_clear_count++;
+      }
+      if (s_warn_clear_count >= VOLTPROT_LOW_WARN_DEBOUNCE)
+      {
+        s_low_voltage_warn = false;
+      }
+    }
+    else if (meas->vcell_min_mv <= VOLTPROT_LOW_WARN_MV)
+    {
+      s_warn_clear_count = 0U;
+      if (s_warn_enter_count < VOLTPROT_LOW_WARN_DEBOUNCE)
+      {
+        s_warn_enter_count++;
+      }
+      if (s_warn_enter_count >= VOLTPROT_LOW_WARN_DEBOUNCE)
+      {
+        s_low_voltage_warn = true;
+      }
     }
     else if (meas->vcell_min_mv >= VOLTPROT_LOW_WARN_CLEAR_MV)
     {
-      s_low_voltage_warn = false;
+      s_warn_enter_count = 0U;
+      if (s_warn_clear_count < VOLTPROT_LOW_WARN_DEBOUNCE)
+      {
+        s_warn_clear_count++;
+      }
+      if (s_warn_clear_count >= VOLTPROT_LOW_WARN_DEBOUNCE)
+      {
+        s_low_voltage_warn = false;
+      }
+    }
+    else
+    {
+      s_warn_enter_count = 0U;
+      s_warn_clear_count = 0U;
     }
 
     if ((state == VOLTPROT_STATE_NORMAL) && s_low_voltage_warn)

@@ -59,6 +59,9 @@
 /* USER CODE BEGIN PD */
 #define BMS_TASK_PERIOD_MS                500U
 #define LIN_CHARGER_PROCESS_MS            100U
+#define POWER_TASK_PERIOD_MS              200U
+#define BUZZER_LOW_BATT_BEEPS               6U
+#define BUZZER_LOW_BATT_PERIOD_MS        8000U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -300,6 +303,7 @@ void StartPowerTask(void *argument)
   {
     ChargePath_Init();
     BSP_PowerRails_Init();
+    BSP_Buzzer_Init();
   }
 
   for (;;)
@@ -309,8 +313,9 @@ void StartPowerTask(void *argument)
       BSP_AdcRails_Update();
       BSP_PowerRails_Process();
       ChargePath_Apply();
+      BSP_Buzzer_Process(POWER_TASK_PERIOD_MS);
     }
-    osDelay(200);
+    osDelay(POWER_TASK_PERIOD_MS);
   }
   /* USER CODE END PowerTask */
 }
@@ -326,6 +331,7 @@ void StartBmsTask(void *argument)
 {
   /* USER CODE BEGIN BmsTask */
   static bool s_bq_prot_read = false;
+  static uint32_t s_low_batt_beep_ms = 0U;
   (void)argument;
 
   while (!SoftStart_IsSystemReady() && !SoftStart_IsBootFault())
@@ -398,6 +404,30 @@ void StartBmsTask(void *argument)
                                           &status_c);
       BSP_PowerRails_UpdateBqSafety(status_a, status_b, status_c, ok);
       CellVoltageProtect_Process(status_a, ok, &s_bq_meas);
+
+      /* 低电量：立刻响 6 声，之后每 8s 再响 6 声。
+       * 只用去抖后的低电量预警，不用 CUV：断电瞬间 BQ 可能误报 CUV。 */
+      {
+        bool low_batt = CellVoltageProtect_IsLowVoltageWarn();
+
+        if (low_batt)
+        {
+          if (s_low_batt_beep_ms == 0U)
+          {
+            BSP_Buzzer_PlayBeeps(BUZZER_LOW_BATT_BEEPS);
+          }
+
+          s_low_batt_beep_ms += BMS_TASK_PERIOD_MS;
+          if (s_low_batt_beep_ms >= BUZZER_LOW_BATT_PERIOD_MS)
+          {
+            s_low_batt_beep_ms = 0U;
+          }
+        }
+        else
+        {
+          s_low_batt_beep_ms = 0U;
+        }
+      }
     }
 
     ChargePath_Apply();
