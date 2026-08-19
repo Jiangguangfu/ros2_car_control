@@ -8,6 +8,7 @@
 
 #include "bsp_power_rails.h"
 #include "bsp_adc_rails.h"
+#include "bsp_fan.h"
 #include "charge_path.h"
 #include "cmsis_os2.h"
 #include "SEGGER_RTT.h"
@@ -723,6 +724,9 @@ void SoftStart_Process(void)
       if (s_posc.rail_12v_ok)
       {
         SoftStart_LogRailCurrents("after_12V");
+#if FAN_FORCE_FULL_SPEED
+        BSP_Fan_Init();
+#endif
         if (s_posc.current_valid)
         {
           s_posc.current_after_12v_ma = s_posc.meas.current_ma;

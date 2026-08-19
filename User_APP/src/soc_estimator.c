@@ -7,7 +7,7 @@
 #include "soc_estimator.h"
 
 /* 6S NMC：单节电压 → SOC 线性近似（标定后可改） */
-#define SOC_CELL_EMPTY_MV              3000U
+#define SOC_CELL_EMPTY_MV              3300U
 #define SOC_CELL_FULL_MV               4200U
 #define SOC_FULL_CLAMP_CELL_MV         4150U
 #define SOC_FULL_TAPER_MA               150

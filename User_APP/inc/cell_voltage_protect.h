@@ -19,10 +19,10 @@ extern "C" {
 
 /** 单节最低电压低于该值 → 低电量预警（不禁充放）。 */
 #ifndef VOLTPROT_LOW_WARN_MV
-#define VOLTPROT_LOW_WARN_MV              3300U
+#define VOLTPROT_LOW_WARN_MV              3450U
 #endif
 #ifndef VOLTPROT_LOW_WARN_CLEAR_MV
-#define VOLTPROT_LOW_WARN_CLEAR_MV        3450U
+#define VOLTPROT_LOW_WARN_CLEAR_MV        3500U
 #endif
 /** 进出预警连续确认次数（BmsTask 500 ms × 3 ≈ 1.5 s），避免负载抖动误报。 */
 #ifndef VOLTPROT_LOW_WARN_DEBOUNCE

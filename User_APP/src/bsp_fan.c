@@ -16,12 +16,16 @@ static uint8_t s_duty_percent;
 
 void BSP_Fan_Init(void)
 {
-  s_duty_percent = 0U;
   if (htim4.State == HAL_TIM_STATE_RESET) {
     return;
   }
-  __HAL_TIM_SET_COMPARE(&htim4, FAN_TIM_CHANNEL, 0U);
   (void)HAL_TIM_PWM_Start(&htim4, FAN_TIM_CHANNEL);
+#if FAN_FORCE_FULL_SPEED
+  BSP_Fan_SetDutyPercent(100U);
+#else
+  s_duty_percent = 0U;
+  __HAL_TIM_SET_COMPARE(&htim4, FAN_TIM_CHANNEL, 0U);
+#endif
 }
 
 void BSP_Fan_SetDutyPercent(uint8_t duty_percent)
@@ -31,6 +35,10 @@ void BSP_Fan_SetDutyPercent(uint8_t duty_percent)
   if (htim4.State == HAL_TIM_STATE_RESET) {
     return;
   }
+
+#if FAN_FORCE_FULL_SPEED
+  duty_percent = 100U;
+#endif
 
   if (duty_percent > 100U)
   {

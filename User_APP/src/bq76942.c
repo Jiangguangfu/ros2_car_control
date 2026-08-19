@@ -639,6 +639,7 @@ bool BQ76942_WriteProtectionConfig(I2C_HandleTypeDef *hi2c)
   uint8_t enabled_prot_a = BQ76942_ENABLED_PROT_A;
   uint8_t chg_fet_prot_a = BQ76942_CHG_FET_PROT_A;
   uint8_t dsg_fet_prot_a = BQ76942_DSG_FET_PROT_A;
+  uint8_t cuv_threshold = BQ76942_CUV_THRESHOLD;
   uint8_t block[BQ76942_DM_PROT_BLOCK_LEN];
   bool ok;
 
@@ -675,6 +676,8 @@ bool BQ76942_WriteProtectionConfig(I2C_HandleTypeDef *hi2c)
                                      &chg_fet_prot_a, 1U);
   ok = ok && BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_DSG_FET_PROT_A,
                                      &dsg_fet_prot_a, 1U);
+  ok = ok && BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_CUV_THRESHOLD,
+                                     &cuv_threshold, 1U);
   ok = ok && BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_OCC_THRESHOLD,
                                      block, (uint8_t)sizeof(block));
   BQ76942_I2cUnlock();

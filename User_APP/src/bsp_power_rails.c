@@ -581,6 +581,9 @@ static void PowerRails_ApplyActuators(void)
 
   duty = PowerRails_FanDutyFromThermal();
 
+#if FAN_FORCE_FULL_SPEED
+  duty = 100U;
+#else
   /* SCRUM-113: 充电主动散热；与热保护取较大值，高温停充后仍可转直到降温。 */
   if (PowerRails_WantChargeFan() &&
       ((s_thermal_state != PWR_STATE_LIMIT) ||
@@ -591,6 +594,7 @@ static void PowerRails_ApplyActuators(void)
       duty = CHARGE_ACTIVE_FAN_DUTY;
     }
   }
+#endif
 
   /* Current protect rail / FET */
   switch (s_current_state)
@@ -677,7 +681,7 @@ void BSP_PowerRails_Init(void)
 
   s_pwr_rails_status.enabled_mask = 0U;
   s_pwr_rails_status.power_rails_mask = PWR_MASK_ALL;
-  s_pwr_rails_status.fan_duty_percent = 0U;
+  s_pwr_rails_status.fan_duty_percent = FAN_FORCE_FULL_SPEED ? 100U : 0U;
   s_pwr_rails_status.charge_inhibit = false;
   s_pwr_rails_status.discharge_inhibit = false;
   s_pwr_rails_status.state = PWR_STATE_NORMAL;

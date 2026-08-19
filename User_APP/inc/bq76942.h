@@ -98,6 +98,13 @@ extern "C" {
 #define BQ76942_DM_CUV_THRESHOLD          0x9275U
 #define BQ76942_DM_COV_THRESHOLD          0x9278U
 #define BQ76942_CELL_THRESHOLD_MV_FACTOR  506U  /* 50.6 mV ×10 for integer math */
+#ifndef BQ76942_CUV_THRESHOLD_MV
+#define BQ76942_CUV_THRESHOLD_MV          3000U
+#endif
+#ifndef BQ76942_CUV_THRESHOLD
+/* TRM: code × 50.6 mV；59 → 2985 mV（最接近 3.0 V） */
+#define BQ76942_CUV_THRESHOLD             59U
+#endif
 
 /* Data memory: Protections:OCC (TRM 13.6.4). Threshold U1 in 2 mV across sense. */
 #define BQ76942_DM_OCC_THRESHOLD          0x9280U
