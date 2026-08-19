@@ -41,10 +41,12 @@
 #define BSP_ADC_INA180_GAIN       50U
 #define BSP_ADC_SHUNT_MOHM        10U
 
-/* 12V/6.5V：90% 标称电压；19V/24V：输出电流。 */
-#define BSP_ADC_GOOD_12V_MV      10800U
-#define BSP_ADC_GOOD_6V5_MV       5850U
-#define BSP_ADC_GOOD_CURRENT_MA     50U
+/* 12V/6.5V：90% 标称电压；24V：负载电流；19V：负载或空载（见 IsRailGood）。 */
+#define BSP_ADC_GOOD_12V_MV           10800U
+#define BSP_ADC_GOOD_6V5_MV            5850U
+#define BSP_ADC_GOOD_24V_CURRENT_MA      50U
+#define BSP_ADC_GOOD_19V_LOAD_MA          5U
+#define BSP_ADC_19V_IDLE_MAX_MA          20U
 
 typedef struct
 {
@@ -253,10 +255,22 @@ bool BSP_AdcRails_IsRailGood(pwr_rail_id_t rail)
     }
   }
 
-  /* 19V / 24V：无电压采样，用电流判断。 */
-  if ((rail == PWR_RAIL_19V) || (rail == PWR_RAIL_24V))
+  if (rail == PWR_RAIL_24V)
   {
-    return s_adc_status.rail_ma[rail] >= BSP_ADC_GOOD_CURRENT_MA;
+    return s_adc_status.rail_ma[rail] >= BSP_ADC_GOOD_24V_CURRENT_MA;
+  }
+
+  if (rail == PWR_RAIL_19V)
+  {
+    uint32_t ma = s_adc_status.rail_ma[rail];
+
+    if (ma >= BSP_ADC_GOOD_19V_LOAD_MA)
+    {
+      return true;
+    }
+
+    /* 台架/LIN：桩侧 24V 供电时 19V 常空载，shunt 读数≈0 仍视为就绪。 */
+    return ma <= BSP_ADC_19V_IDLE_MAX_MA;
   }
 
   return false;

@@ -45,8 +45,16 @@ static void Balance_StopAll(I2C_HandleTypeDef *hi2c)
   s_status.active_mask = 0U;
 }
 
+/* Bench: do not pause charging for Δ / mid-protect (avoids pile red/green flicker). */
+#define BALANCE_CHARGE_PAUSE_ENABLE         0
+
 static void Balance_ApplyChargeInhibit(bool inhibit)
 {
+  if (!BALANCE_CHARGE_PAUSE_ENABLE)
+  {
+    inhibit = false;
+  }
+
   s_status.imbalance_charge_inhibit = inhibit;
   ChargePath_SetImbalanceChargeInhibit(inhibit);
   ChargePath_Apply();

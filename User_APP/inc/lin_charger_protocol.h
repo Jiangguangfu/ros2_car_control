@@ -28,6 +28,8 @@ extern "C" {
 
 /** Master 帧丢失超时 → 暂停充电（ms） */
 #define LIN_COMM_TIMEOUT_MS             1000u
+/** 已停充暂停时放宽（J-Link 调试 halt 不致立刻 comm_lost） */
+#define LIN_COMM_TIMEOUT_PAUSED_MS      3000u
 
 /* -------------------------------------------------------------------------- */
 /* LIN PID（Protected Identifier，不含校验位）                                 */

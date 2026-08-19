@@ -82,6 +82,9 @@ void ChargeManager_Stop(void);
 /** 清除可恢复异常后回到 IDLE（需温度/通信/保护已恢复）。 */
 bool ChargeManager_ClearFault(void);
 
+/** After max Δ-pause cycles: COMPLETED if taper full, else FAULT_IMBALANCE. */
+void ChargeManager_FinishAfterImbalanceCycles(void);
+
 /** LIN 会话 ACTIVE 时电流由充电桩提供，不要因尚未出流报 NO_CURRENT。 */
 void ChargeManager_SetLinChargeExpect(bool expect);
 

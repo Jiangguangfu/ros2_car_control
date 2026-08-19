@@ -9,6 +9,8 @@
 #include "bsp_fan.h"
 #include "bq76942.h"
 #include "charge_path.h"
+#include "charge_manager.h"
+#include "lin_charger.h"
 #include "app_freertos.h"
 #include "main.h"
 #include "cmsis_os2.h"
@@ -27,6 +29,8 @@
 #define THERMAL_FAN_DUTY_WARN              45U
 #define THERMAL_FAN_DUTY_LIMIT             80U
 #define THERMAL_FAN_DUTY_FAULT            100U
+#define CHARGE_ACTIVE_FAN_DUTY             65U
+#define CHARGE_FAN_MIN_CURRENT_MA            50
 #define THERMAL_SENSOR_FAIL_THRESHOLD       6U
 
 /* Soft discharge OC (mA). */
@@ -475,6 +479,65 @@ static void PowerRails_EvalCurrent(void)
 /* Combine + actuate                                                          */
 /* -------------------------------------------------------------------------- */
 
+static uint8_t PowerRails_FanDutyFromThermal(void)
+{
+  switch (s_thermal_state)
+  {
+    case PWR_STATE_WARN:
+      return THERMAL_FAN_DUTY_WARN;
+
+    case PWR_STATE_LIMIT:
+      if (s_thermal_reason == PWR_REASON_COLD_CHARGE)
+      {
+        return THERMAL_FAN_DUTY_NORMAL;
+      }
+      return THERMAL_FAN_DUTY_LIMIT;
+
+    case PWR_STATE_FAULT:
+      return THERMAL_FAN_DUTY_FAULT;
+
+    case PWR_STATE_NORMAL:
+    default:
+      return THERMAL_FAN_DUTY_NORMAL;
+  }
+}
+
+/** 仅真实充电会话：停充 / LIN 断 / 无电流 → 关充电扇；高温另走热保护扇速。 */
+static bool PowerRails_WantChargeFan(void)
+{
+  const charge_status_t *chg = ChargeManager_GetStatus();
+  const lin_charger_status_t *lin = LinCharger_GetStatus();
+  int16_t i_ma;
+
+  if (ChargeManager_GetState() != CHARGE_STATE_CHARGING)
+  {
+    return false;
+  }
+
+  if ((chg == NULL) || chg->charge_paused)
+  {
+    return false;
+  }
+
+  if (LinCharger_IsCommLost() || ChargePath_IsLinCommInhibit())
+  {
+    return false;
+  }
+
+  if ((lin == NULL) || (lin->session < LIN_SESSION_ACTIVE))
+  {
+    return false;
+  }
+
+  i_ma = chg->pack_current_ma;
+  if (i_ma < 0)
+  {
+    i_ma = (int16_t)(-i_ma);
+  }
+
+  return (i_ma >= CHARGE_FAN_MIN_CURRENT_MA);
+}
+
 static void PowerRails_ApplyActuators(void)
 {
   uint8_t thermal_mask = PWR_MASK_ALL;
@@ -485,27 +548,23 @@ static void PowerRails_ApplyActuators(void)
   bool protect_chg = false;
   bool protect_dsg = false;
 
-  /* Thermal rail / FET / fan */
+  /* Thermal rail / FET (fan duty computed below). */
   switch (s_thermal_state)
   {
     case PWR_STATE_WARN:
-      duty = THERMAL_FAN_DUTY_WARN;
       break;
     case PWR_STATE_LIMIT:
       if (s_thermal_reason == PWR_REASON_COLD_CHARGE)
       {
-        duty = THERMAL_FAN_DUTY_NORMAL;
         thermal_mask = PWR_MASK_ALL;
       }
       else
       {
-        duty = THERMAL_FAN_DUTY_LIMIT;
         thermal_mask = PWR_RAILS_DROP_19V;
       }
       thermal_chg = true;
       break;
     case PWR_STATE_FAULT:
-      duty = THERMAL_FAN_DUTY_FAULT;
       thermal_mask = PWR_RAILS_FAULT_FAN_ENABLE;
       thermal_chg = true;
       thermal_dsg = true;
@@ -513,6 +572,19 @@ static void PowerRails_ApplyActuators(void)
     case PWR_STATE_NORMAL:
     default:
       break;
+  }
+
+  duty = PowerRails_FanDutyFromThermal();
+
+  /* SCRUM-113: 充电主动散热；与热保护取较大值，高温停充后仍可转直到降温。 */
+  if (PowerRails_WantChargeFan() &&
+      ((s_thermal_state != PWR_STATE_LIMIT) ||
+       (s_thermal_reason != PWR_REASON_COLD_CHARGE)))
+  {
+    if (duty < CHARGE_ACTIVE_FAN_DUTY)
+    {
+      duty = CHARGE_ACTIVE_FAN_DUTY;
+    }
   }
 
   /* Current protect rail / FET */

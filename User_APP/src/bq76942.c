@@ -11,6 +11,7 @@
 
 #define BQ76942_I2C_TIMEOUT_MS            50U
 #define BQ76942_SUBCMD_WAIT_MS            2U
+#define BQ76942_BALANCE_SUBCMD_WAIT_MS    20U
 #define BQ76942_FET_ON_WAIT_MS            10U
 #define BQ76942_FET_ON_RETRY              20U
 
@@ -116,22 +117,6 @@ static uint8_t Bq76942_DmChecksum(const uint8_t *data, uint8_t len)
 static bool BQ76942_ReadU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t *value)
 {
   return BQ76942_ReadDirectU16(hi2c, cmd, value);
-}
-
-static bool BQ76942_WriteU16(I2C_HandleTypeDef *hi2c, uint8_t cmd, uint16_t value)
-{
-  uint8_t buf[2];
-
-  if (hi2c == NULL)
-  {
-    return false;
-  }
-
-  buf[0] = (uint8_t)(value & 0xFFU);
-  buf[1] = (uint8_t)((value >> 8) & 0xFFU);
-
-  return (BqI2cMemWrite(hi2c, BQ76942_I2C_ADDR_HAL, cmd, I2C_MEMADD_SIZE_8BIT,
-                            buf, sizeof(buf), BQ76942_I2C_TIMEOUT_MS) == HAL_OK);
 }
 
 bool BQ76942_IsReady(I2C_HandleTypeDef *hi2c)
@@ -938,6 +923,52 @@ out:
   return ok;
 }
 
+static bool BQ76942_SubCommandWriteU16(I2C_HandleTypeDef *hi2c, uint16_t subcmd,
+                                       uint16_t value)
+{
+  uint8_t block[4];
+  uint8_t meta[2];
+  bool ok = false;
+
+  if (hi2c == NULL)
+  {
+    return false;
+  }
+
+  if (!BQ76942_I2cLock())
+  {
+    return false;
+  }
+
+  block[0] = (uint8_t)(subcmd & 0xFFU);
+  block[1] = (uint8_t)((subcmd >> 8) & 0xFFU);
+  block[2] = (uint8_t)(value & 0xFFU);
+  block[3] = (uint8_t)((value >> 8) & 0xFFU);
+
+  if (BqI2cMemWrite(hi2c, BQ76942_I2C_ADDR_HAL, BQ76942_REG_CMD_LOW,
+                        I2C_MEMADD_SIZE_8BIT, block, sizeof(block),
+                        BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    goto out;
+  }
+
+  meta[0] = Bq76942_DmChecksum(block, (uint8_t)sizeof(block));
+  meta[1] = (uint8_t)(sizeof(block) + 2U);
+  if (BqI2cMemWrite(hi2c, BQ76942_I2C_ADDR_HAL, 0x60U,
+                        I2C_MEMADD_SIZE_8BIT, meta, sizeof(meta),
+                        BQ76942_I2C_TIMEOUT_MS) != HAL_OK)
+  {
+    goto out;
+  }
+
+  osDelay(BQ76942_SUBCMD_WAIT_MS);
+  ok = true;
+
+out:
+  BQ76942_I2cUnlock();
+  return ok;
+}
+
 static bool BQ76942_SubCommandWriteU8(I2C_HandleTypeDef *hi2c, uint16_t subcmd,
                                       uint8_t data)
 {
@@ -1149,7 +1180,7 @@ bool BQ76942_EnableDischargePath(I2C_HandleTypeDef *hi2c)
     return false;
   }
 
-  /* DFETOFF owned by charge_path. */
+  /* 24V bypass unused. DFETOFF owned by charge_path. */
   if (!BQ76942_EnsureFetsEnabled(hi2c))
   {
     goto out;
@@ -1321,12 +1352,20 @@ bool BQ76942_ReadSafetyStatus(I2C_HandleTypeDef *hi2c, bool *protect_active)
 
 bool BQ76942_SetBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t mask)
 {
+  bool ok;
+
   if (hi2c == NULL)
   {
     return false;
   }
 
-  return BQ76942_WriteU16(hi2c, BQ76942_CMD_CB_ACTIVE_CELLS, mask);
+  ok = BQ76942_SubCommandWriteU16(hi2c, BQ76942_SUBCMD_CB_ACTIVE_CELLS, mask);
+  if (ok)
+  {
+    osDelay(BQ76942_BALANCE_SUBCMD_WAIT_MS);
+  }
+
+  return ok;
 }
 
 bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask)
@@ -1336,5 +1375,15 @@ bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask)
     return false;
   }
 
-  return BQ76942_ReadU16(hi2c, BQ76942_CMD_CB_ACTIVE_CELLS, mask);
+  return BQ76942_SubCommandReadU16(hi2c, BQ76942_SUBCMD_CB_ACTIVE_CELLS, mask);
+}
+
+bool BQ76942_ReadBalanceActiveSec(I2C_HandleTypeDef *hi2c, uint16_t *seconds)
+{
+  if ((hi2c == NULL) || (seconds == NULL))
+  {
+    return false;
+  }
+
+  return BQ76942_SubCommandReadU16(hi2c, BQ76942_SUBCMD_CBSTATUS1, seconds);
 }

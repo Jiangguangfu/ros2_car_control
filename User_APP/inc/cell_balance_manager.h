@@ -60,8 +60,8 @@ extern "C" {
 
 /* Mid-charge: protect highest cell + classify IR vs real. Not equalization. */
 #define BALANCE_MID_VMAX_WARN_MV           4000U
-#define BALANCE_MID_VMAX_DANGER_MV         4120U
-#define BALANCE_MID_VMAX_SAFE_MV           4080U
+#define BALANCE_MID_VMAX_DANGER_MV         4180U
+#define BALANCE_MID_VMAX_SAFE_MV           4150U
 #define BALANCE_MID_OBSERVE_DELTA_MV        150U
 #define BALANCE_MID_FAKE_SHRINK_MV           50U
 #define BALANCE_MID_REST_REAL_DELTA_MV       80U

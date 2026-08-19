@@ -154,6 +154,9 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
       if (charge->fault_reason == CHARGE_FAULT_COMM) {
         alarm = (uint32_t)(alarm | BMS_EXT_ALARM_COMM_FAIL);
       }
+      if (charge->fault_reason == CHARGE_FAULT_IMBALANCE) {
+        alarm = (uint32_t)(alarm | BMS_EXT_ALARM_IMBALANCE_CHG);
+      }
     }
   }
 

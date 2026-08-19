@@ -33,6 +33,8 @@
 static charge_status_t s_status;
 static uint32_t s_phase_enter_ms;
 static uint8_t s_start_debounce;
+static uint8_t s_bq_protect_count;
+static uint8_t s_bq_protect_clear_count;
 static bool s_inited;
 static bool s_lin_charge_expect;
 
@@ -44,6 +46,7 @@ static void ChargeManager_SetFault(charge_fault_reason_t reason)
   s_status.user_start_request = false;
   s_status.charge_paused = false;
   s_status.cv_taper_count = 0U;
+  s_bq_protect_clear_count = 0U;
   ChargePath_SetChargeManagerInhibit(true);
   ChargePath_Apply();
   Balance_SetChargerPresent(false);
@@ -60,6 +63,8 @@ static void ChargeManager_EnterIdle(void)
   s_status.charge_elapsed_ms = 0U;
   s_phase_enter_ms = 0U;
   s_start_debounce = 0U;
+  s_bq_protect_count = 0U;
+  s_bq_protect_clear_count = 0U;
   ChargePath_SetChargeManagerInhibit(true);
   ChargePath_Apply();
   Balance_SetChargerPresent(false);
@@ -158,13 +163,72 @@ static bool ChargeManager_CheckProtectFault(I2C_HandleTypeDef *hi2c)
 {
   bool protect = false;
 
-  if ((hi2c != NULL) && BQ76942_ReadSafetyStatus(hi2c, &protect) && protect)
+  /* 压差停充 + 被动均衡时 BQ 可能瞬态置位 Safety Status，勿单次即 FAULT。 */
+  if (ChargePath_IsImbalanceChargeInhibit())
   {
-    ChargeManager_SetFault(CHARGE_FAULT_BQ_PROTECT);
-    return true;
+    s_bq_protect_count = 0U;
+    return false;
   }
 
-  return false;
+  if ((hi2c == NULL) || !BQ76942_ReadSafetyStatus(hi2c, &protect))
+  {
+    s_bq_protect_count = 0U;
+    return false;
+  }
+
+  if (!protect)
+  {
+    s_bq_protect_count = 0U;
+    return false;
+  }
+
+  if (s_bq_protect_count < 255U)
+  {
+    s_bq_protect_count++;
+  }
+
+  if (s_bq_protect_count < 3U)
+  {
+    return false;
+  }
+
+  ChargeManager_SetFault(CHARGE_FAULT_BQ_PROTECT);
+  return true;
+}
+
+static void ChargeManager_TryRecoverBqProtect(I2C_HandleTypeDef *hi2c)
+{
+  bool protect = false;
+
+  if (s_status.state != CHARGE_STATE_FAULT)
+  {
+    s_bq_protect_clear_count = 0U;
+    return;
+  }
+
+  if (s_status.fault_reason != CHARGE_FAULT_BQ_PROTECT)
+  {
+    s_bq_protect_clear_count = 0U;
+    return;
+  }
+
+  if ((hi2c == NULL) || !BQ76942_ReadSafetyStatus(hi2c, &protect) || protect)
+  {
+    s_bq_protect_clear_count = 0U;
+    return;
+  }
+
+  if (s_bq_protect_clear_count < 255U)
+  {
+    s_bq_protect_clear_count++;
+  }
+
+  if (s_bq_protect_clear_count >= 3U)
+  {
+    s_bq_protect_clear_count = 0U;
+    s_bq_protect_count = 0U;
+    ChargeManager_EnterIdle();
+  }
 }
 
 static void ChargeManager_CheckFaults(I2C_HandleTypeDef *hi2c)
@@ -405,13 +469,33 @@ bool ChargeManager_ClearFault(void)
 
   /* 不可恢复类故障需外部干预后再清 */
   if ((s_status.fault_reason == CHARGE_FAULT_OVERVOLT) ||
-      (s_status.fault_reason == CHARGE_FAULT_BQ_PROTECT))
+      (s_status.fault_reason == CHARGE_FAULT_BQ_PROTECT) ||
+      (s_status.fault_reason == CHARGE_FAULT_IMBALANCE))
   {
     return false;
   }
 
   ChargeManager_EnterIdle();
   return true;
+}
+
+void ChargeManager_FinishAfterImbalanceCycles(void)
+{
+  if (s_status.state != CHARGE_STATE_CHARGING)
+  {
+    return;
+  }
+
+  if ((s_status.phase == CHARGE_PHASE_CV) &&
+      (s_status.vcell_max_mv >= (CHARGE_CELL_FULL_MV - 20U)) &&
+      (s_status.pack_current_ma <= CHARGE_CV_TAPER_CURRENT_MA))
+  {
+    ChargeManager_EnterCompleted();
+  }
+  else
+  {
+    ChargeManager_SetFault(CHARGE_FAULT_IMBALANCE);
+  }
 }
 
 void ChargeManager_Process(I2C_HandleTypeDef *hi2c)
@@ -443,6 +527,7 @@ void ChargeManager_Process(I2C_HandleTypeDef *hi2c)
       break;
 
     case CHARGE_STATE_FAULT:
+      ChargeManager_TryRecoverBqProtect(hi2c);
       ChargeManager_ApplyChargePath(false);
       break;
 

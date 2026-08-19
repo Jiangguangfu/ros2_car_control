@@ -5,7 +5,7 @@
  *
  * Schematic (BQ76942PBR):
  *   TS1 — NTC (protect); TS2 — NTC (report only); TS3 — SW2
- *   PC13 PWR_24V_BYPASS_EN 由缓启动 S1 打开；BQ_DFETOFF / FET 由 charge_path 管理
+ *   PC13 PWR_24V_BYPASS_EN 本项目不用，始终关闭；BQ_DFETOFF / FET 由 charge_path 管理
  ******************************************************************************
  */
 #ifndef BQ76942_H
@@ -31,7 +31,10 @@ extern "C" {
 #define BQ76942_CMD_PACK_VOLTAGE          0x36U
 #define BQ76942_CMD_LD_VOLTAGE            0x38U
 #define BQ76942_CMD_CC2_CURRENT           0x3AU
-#define BQ76942_CMD_CB_ACTIVE_CELLS       0x83U
+/* Cell balancing subcommands (TRM §10; not direct-command 0x83). */
+#define BQ76942_SUBCMD_CB_ACTIVE_CELLS    0x0083U
+#define BQ76942_SUBCMD_CB_SET_LVL         0x0084U
+#define BQ76942_SUBCMD_CBSTATUS1          0x0085U
 #define BQ76942_CMD_FET_STATUS            0x7FU
 #define BQ76942_CMD_INT_TEMP              0x68U
 #define BQ76942_CMD_TS1_TEMP              0x70U
@@ -349,6 +352,8 @@ bool BQ76942_ReadSafetyStatusEx(I2C_HandleTypeDef *hi2c,
                                 uint8_t *status_c);
 bool BQ76942_SetBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t mask);
 bool BQ76942_ReadBalanceMask(I2C_HandleTypeDef *hi2c, uint16_t *mask);
+/** CBSTATUS1: continuous balancing time in seconds (0x0085 read). */
+bool BQ76942_ReadBalanceActiveSec(I2C_HandleTypeDef *hi2c, uint16_t *seconds);
 
 /**
  * FET_EN + ALL_FETS_OFF + 先 PDSG_ONLY，见到 PDSG/DSG 后再 ALLOW_ALL。
