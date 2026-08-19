@@ -43,6 +43,11 @@
 #define PWR_RAILS_ENABLE_ALL_EXCEPT_19V \
   ((uint8_t)(PWR_MASK_ALL & ~PWR_MASK_19V))
 
+/* 19V 无电压分压，到位不看电流：EN 拉高后延时，再确认无短路。 */
+#define PWR_RAIL_19V_ON_DELAY_MS            500U
+/* INA180 满量程约 6.6 A，持续高于此视为 19V 输出短路。 */
+#define PWR_RAIL_19V_SHORT_MA               5000U
+
 /* FAULT: 全部电源轨关闭。 */
 #define PWR_RAILS_FAULT_FAN_ENABLE \
   ((uint8_t)0U)
@@ -763,6 +768,15 @@ bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on)
   PowerRails_WriteGpio(rail, on);
   s_pwr_rails_status.rail_on[rail] = on;
 
+  if ((rail == PWR_RAIL_19V) && on)
+  {
+    if (HAL_GPIO_ReadPin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin) != GPIO_PIN_SET)
+    {
+      s_pwr_rails_status.rail_on[PWR_RAIL_19V] = false;
+      return false;
+    }
+  }
+
   if (rail == PWR_RAIL_6V5)
   {
     s_pwr_rails_status.rail_on[PWR_RAIL_5V] = on;
@@ -781,11 +795,54 @@ bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on)
   return true;
 }
 
+static bool PowerRails_Is19vEnHigh(void)
+{
+  return (HAL_GPIO_ReadPin(PWR_19V_EN_GPIO_Port, PWR_19V_EN_Pin) == GPIO_PIN_SET);
+}
+
+static bool PowerRails_Is19vShorted(void)
+{
+  if (s_pwr_rails_status.scd)
+  {
+    return true;
+  }
+
+  if (!BSP_AdcRails_IsReady())
+  {
+    return false;
+  }
+
+  BSP_AdcRails_Update();
+  return (BSP_AdcRails_GetRailMa(PWR_RAIL_19V) >= PWR_RAIL_19V_SHORT_MA);
+}
+
+/* 19V：MCU 已把 EN 拉高，且硬件未反馈短路，延时后认为已打开。 */
+static bool PowerRails_Wait19vOn(uint32_t timeout_ms)
+{
+  if (!s_pwr_rails_status.rail_on[PWR_RAIL_19V] || !PowerRails_Is19vEnHigh())
+  {
+    return false;
+  }
+
+  if (timeout_ms < PWR_RAIL_19V_ON_DELAY_MS)
+  {
+    return false;
+  }
+
+  osDelay(PWR_RAIL_19V_ON_DELAY_MS);
+
+  if (!PowerRails_Is19vEnHigh())
+  {
+    return false;
+  }
+
+  return !PowerRails_Is19vShorted();
+}
+
 bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms)
 {
   const uint32_t poll_ms = 10U;
   const uint8_t confirm_needed = 3U;
-  const uint32_t current_settle_ms = 300U;
   uint32_t elapsed = 0U;
   uint8_t confirm = 0U;
 
@@ -794,20 +851,14 @@ bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms)
     return false;
   }
 
+  /* 19V：EN 拉高且无短路，延时后认为已打开。 */
+  if (rail == PWR_RAIL_19V)
+  {
+    return PowerRails_Wait19vOn(timeout_ms);
+  }
   if (!BSP_AdcRails_IsReady())
   {
     return false;
-  }
-
-  /* 19V/24V 靠电流判断：跳过上电浪涌后再采稳态，避免空载误判到位。 */
-  if ((rail == PWR_RAIL_19V) || (rail == PWR_RAIL_24V))
-  {
-    if (timeout_ms <= current_settle_ms)
-    {
-      return false;
-    }
-    osDelay(current_settle_ms);
-    timeout_ms -= current_settle_ms;
   }
 
   while (elapsed < timeout_ms)

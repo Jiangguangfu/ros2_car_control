@@ -764,7 +764,7 @@ void SoftStart_Process(void)
       break;
 
     case POSC_S5_19V:
-      /* 19V：无电压分压，PA1 IN4 电流到位后才进 Ready；超时进 FAULT。 */
+      /* 19V：无电压分压，不用电流。EN 拉高且无短路反馈，延时后进 Ready。 */
       if (!BSP_PowerRails_EnableRail(PWR_RAIL_19V, true))
       {
         SoftStart_EnterFault();
@@ -775,12 +775,21 @@ void SoftStart_Process(void)
                                       POSC_RAIL_PGOOD_TIMEOUT_MS);
       if (s_posc.rail_19v_ok)
       {
+        SoftStart_ReadChip();
+        if (s_posc.safety_valid &&
+            ((s_posc.safety_a & BQ76942_SA_SCD) != 0U))
+        {
+          s_posc.rail_19v_ok = false;
+          SoftStart_LogRailCurrents("after_19V_scd");
+          SoftStart_EnterFault();
+          break;
+        }
         SoftStart_LogRailCurrents("after_19V");
         SoftStart_EnterReady();
       }
       else
       {
-        SoftStart_LogRailCurrents("after_19V_adc");
+        SoftStart_LogRailCurrents("after_19V_fail");
         SoftStart_EnterFault();
       }
       break;

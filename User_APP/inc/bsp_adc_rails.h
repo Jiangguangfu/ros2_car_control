@@ -4,8 +4,8 @@
  * @brief   电源轨输出电压 / 电流 ADC 监测（DMA 扫描）
  *
  * MCU 引脚与 CubeMX Rank（STM32U375）：
- *   PA0 IN3 Rank1 — ADC_M_24V_O1    INA180A2 × 10 mΩ 电流（24V PGOOD，无电压分压）
- *   PA1 IN4 Rank2 — ADC_M_19V_O1    INA180A2 × 10 mΩ 电流（19V PGOOD，无电压分压）
+ *   PA0 IN3 Rank1 — ADC_M_24V_O1    INA180A2 × 10 mΩ 电流（仅遥测；S1 开 EN，到位不看电流）
+ *   PA1 IN4 Rank2 — ADC_M_19V_O1    INA180A2 × 10 mΩ 电流（19V 遥测 / 短路；到位不看电流）
  *   PA2 IN5 Rank3 — ADC_M_12V_O1    INA180A2 × 10 mΩ 电流（仅遥测）
  *   PA3 IN6 Rank4 — ADC_M_5V        INA180A2 × 10 mΩ 电流
  *   PA6 IN9 Rank5 — ADC_M_7.5V_O1   INA180A2 × 10 mΩ 电流（仅遥测）

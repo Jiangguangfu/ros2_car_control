@@ -101,7 +101,8 @@ void BSP_PowerRails_PreBoot(void);
 void BSP_PowerRails_BootSequence(void);
 /** 逐步使能单路电源轨（更新 rail_on / enabled_mask）。 */
 bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on);
-/** 等待电源轨就绪（连续 3 次）：12V/6.5V 看电压，19V/24V 看电流。 */
+/** 等待电源轨就绪：12V/6.5V 看电压（连续 3 次），24V 看 S1 已拉高 EN，
+ *  19V 看 EN 已拉高且无短路反馈，延时后认为已打开。 */
 bool BSP_PowerRails_WaitRailGood(pwr_rail_id_t rail, uint32_t timeout_ms);
 /** ServiceTask 上电序列完成后置 true，Init/Process 才接管轨控。 */
 void BSP_PowerRails_SetBootComplete(bool complete);

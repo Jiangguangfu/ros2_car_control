@@ -41,12 +41,9 @@
 #define BSP_ADC_INA180_GAIN       50U
 #define BSP_ADC_SHUNT_MOHM        10U
 
-/* 12V/6.5V：90% 标称电压；24V：负载电流；19V：负载或空载（见 IsRailGood）。 */
-#define BSP_ADC_GOOD_12V_MV           10800U
-#define BSP_ADC_GOOD_6V5_MV            5850U
-#define BSP_ADC_GOOD_24V_CURRENT_MA      50U
-#define BSP_ADC_GOOD_19V_LOAD_MA          5U
-#define BSP_ADC_19V_IDLE_MAX_MA          20U
+/* 12V/6.5V：90% 标称电压。24V/19V 到位不看电流。 */
+#define BSP_ADC_GOOD_12V_MV      10800U
+#define BSP_ADC_GOOD_6V5_MV       5850U
 
 typedef struct
 {
@@ -123,13 +120,10 @@ static uint32_t AdcRails_RawToShuntCurrentMa(uint16_t raw)
   {
     return 0U;
   }
-
-  /* I_mA = raw * VREF_mV * 1000 / (ADC_MAX * Rshunt_mOhm * Gain)
-   * 一次算完并四舍五入。若先算 pin_mV 再 ×2，raw=2 会变成 2 mA（应为 3.22 mA）。
-   */
+  /*根据分压比计算电压 I=(raw*VREF*1000)/(ADC_MAX*Rshunt*Gain)*/
   div = (uint64_t)BSP_ADC_MAX_RAW * (uint64_t)den;
   num = (uint64_t)raw * (uint64_t)BSP_ADC_VREF_MV * 1000ULL;
-  return (uint32_t)((num + (div / 2ULL)) / div);
+  return (uint32_t)((num + (div / 2ULL)) / div);//四舍五入
 }
 
 static void AdcRails_RefreshStatus(void)
@@ -152,7 +146,7 @@ static void AdcRails_RefreshStatus(void)
     s_adc_status.rail_mv[i] = 0U;
     s_adc_status.rail_ma[i] = 0U;
   }
-
+  /*读取电压*/
   for (i = 0U; i < (sizeof(s_volt_map) / sizeof(s_volt_map[0])); i++)
   {
     const adc_volt_map_t *map = &s_volt_map[i];
@@ -161,7 +155,7 @@ static void AdcRails_RefreshStatus(void)
     s_adc_status.rail_mv[map->rail] =
         AdcRails_RawToRailMv(raw, map->scale_num, map->scale_den);
   }
-
+  /*读取电流*/
   for (i = 0U; i < (sizeof(s_curr_map) / sizeof(s_curr_map[0])); i++)
   {
     const adc_curr_map_t *map = &s_curr_map[i];
@@ -253,24 +247,6 @@ bool BSP_AdcRails_IsRailGood(pwr_rail_id_t rail)
     {
       return s_adc_status.rail_mv[rail] >= s_volt_map[i].good_min_mv;
     }
-  }
-
-  if (rail == PWR_RAIL_24V)
-  {
-    return s_adc_status.rail_ma[rail] >= BSP_ADC_GOOD_24V_CURRENT_MA;
-  }
-
-  if (rail == PWR_RAIL_19V)
-  {
-    uint32_t ma = s_adc_status.rail_ma[rail];
-
-    if (ma >= BSP_ADC_GOOD_19V_LOAD_MA)
-    {
-      return true;
-    }
-
-    /* 台架/LIN：桩侧 24V 供电时 19V 常空载，shunt 读数≈0 仍视为就绪。 */
-    return ma <= BSP_ADC_19V_IDLE_MAX_MA;
   }
 
   return false;
