@@ -1,4 +1,11 @@
 CompileFlags:
   Add:
-    # arm-none-eabi-gcc query-driver omits this GCC builtin include dir (stdbool.h, etc.)
+    - --target=arm-none-eabi
+    - -mcpu=cortex-m33
+    - -mthumb
+    - -mfpu=fpv5-sp-d16
+    - -mfloat-abi=hard
+    # clangd 未通过 query-driver 拿到 sysroot 时的兜底路径（WSL apt gcc-arm-none-eabi）
     - -isystem/usr/lib/gcc/arm-none-eabi/10.3.1/include
+    - -isystem/usr/lib/gcc/arm-none-eabi/10.3.1/include-fixed
+    - -isystem/usr/lib/arm-none-eabi/include

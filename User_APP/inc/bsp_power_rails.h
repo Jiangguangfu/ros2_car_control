@@ -98,7 +98,6 @@ typedef struct
 void BSP_PowerRails_Init(void);
 /** RTOS 前：全部电源轨关闭，供 ServiceTask 分步上电。 */
 void BSP_PowerRails_PreBoot(void);
-void BSP_PowerRails_BootSequence(void);
 /** 逐步使能单路电源轨（更新 rail_on / enabled_mask）。 */
 bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on);
 /** 等待电源轨就绪：12V/6.5V 看电压（连续 3 次），24V 看 S1 已拉高 EN，
@@ -117,6 +116,8 @@ void BSP_PowerRails_Process(void);
 
 const pwr_rails_status_t *BSP_PowerRails_GetStatus(void);
 pwr_state_t BSP_PowerRails_GetState(void);
+pwr_state_t BSP_PowerRails_GetThermalState(void);
+pwr_reason_t BSP_PowerRails_GetThermalReason(void);
 
 /**
  * Optional: force one recover evaluation now.

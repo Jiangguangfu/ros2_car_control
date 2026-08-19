@@ -1,13 +1,13 @@
 {
-    "C_Cpp.intelliSenseEngine": "default",
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
-    "C_Cpp.default.compilerPath": "/usr/bin/arm-none-eabi-gcc",
-    "C_Cpp.default.intelliSenseMode": "gcc-arm",
-    "C_Cpp.default.cStandard": "c11",
-    "C_Cpp.errorSquiggles": "enabled",
-    "C_Cpp.enhancedColorization": "enabled",
-
-    "clangd.enable": false,
+    // --- C/C++ 代码导航（跳转定义/引用）---
+    // 使用 clangd 做语义分析；关闭 Microsoft C/C++ 扩展的 IntelliSense，避免两套引擎冲突。
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": [
+        "--background-index",
+        "--clang-tidy=false",
+        "--header-insertion=never",
+        "--query-driver=/usr/bin/arm-none-eabi-gcc"
+    ],
 
     "bms.armToolchainBin": "/usr/bin",
     "bms.gdbPath": "/usr/bin/gdb-multiarch",

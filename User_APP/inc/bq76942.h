@@ -60,9 +60,16 @@ extern "C" {
 #define BQ76942_SUBCMD_DASTATUS5          0x0075U /* REG18/VSS/temps + CC1/CC3 */
 #define BQ76942_SUBCMD_CONFIG_UPDATE      0x0090U
 #define BQ76942_SUBCMD_CONFIG_UPDATE_EXIT 0x0092U
+#define BQ76942_SUBCMD_SLEEP_ENABLE       0x0099U
+#define BQ76942_SUBCMD_SLEEP_DISABLE      0x009AU
 
-/* Offset of CC3 Current (I2, userA) within DASTATUS5 transfer buffer. */
+/* Current offsets (I2, userA) within DASTATUS5 transfer buffer. */
 #define BQ76942_DASTATUS5_CC3_OFFSET      20U
+#define BQ76942_DASTATUS5_CC1_OFFSET      22U
+
+/* Battery Status bits. */
+#define BQ76942_BATTERY_STATUS_SLEEP      (1U << 15)
+#define BQ76942_BATTERY_STATUS_SLEEP_EN   (1U << 2)
 
 /* Data memory: Calibration:Current (IEEE-754 F4, little-endian). */
 #define BQ76942_DM_CC_GAIN                0x91A8U
@@ -70,6 +77,20 @@ extern "C" {
 /* CC Gain = 7.4768 / (Rsense_mOhm); Capacity Gain = CC Gain × 298261.6178. */
 #define BQ76942_CC_GAIN_RSENSE_FACTOR     7.4768f
 #define BQ76942_CAPACITY_GAIN_FACTOR      298261.6178f
+
+/* Power:Sleep:Sleep Current (I2, mA). */
+#define BQ76942_DM_SLEEP_CURRENT          0x9248U
+#ifndef BQ76942_SLEEP_CURRENT_MA
+#define BQ76942_SLEEP_CURRENT_MA          20U
+#endif
+
+/* ReadMeasurements 输出一阶 IIR：新值 = 旧值 + (采样值-旧值)/2^N。 */
+#ifndef BQ76942_MEAS_FILTER_SHIFT
+#define BQ76942_MEAS_FILTER_SHIFT         2U
+#endif
+#if (BQ76942_MEAS_FILTER_SHIFT > 8U)
+#error "BQ76942_MEAS_FILTER_SHIFT must be 0..8"
+#endif
 
 /* Data memory: Settings:Protection (TRM 13.3.3). */
 #define BQ76942_DM_ENABLED_PROT_A         0x9261U /* U1, default 0x88 */
@@ -300,6 +321,7 @@ typedef struct
   uint32_t ld_mv;                       /* LD pin (0x38), 负载侧/母线电容电压 mV */
   int16_t current_ma;                   /* CC2 (0x3A), mA (+ charge / - discharge) */
   int16_t current_cc3_ma;               /* CC3 avg of CC2 samples, mA (DASTATUS5) */
+  int16_t current_cc1_ma;               /* CC1 coulomb-counter current, mA (DASTATUS5) */
   uint16_t vcell_min_mv;
   uint16_t vcell_max_mv;
   bool valid;

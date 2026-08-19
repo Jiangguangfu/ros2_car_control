@@ -19,8 +19,8 @@ void BSP_Buzzer_PlayBeeps(uint8_t count);
 /** 立刻静音并取消未完成的蜂鸣序列。 */
 void BSP_Buzzer_Stop(void);
 
-/** 周期调用，推进非阻塞蜂鸣序列。elapsed_ms 为距上次调用的间隔。 */
-void BSP_Buzzer_Process(uint32_t elapsed_ms);
+/** 周期调用：报警调度 + 推进非阻塞蜂鸣序列。elapsed_ms 为距上次调用的间隔。 */
+void Buzzer_AlarmProcess(uint32_t elapsed_ms);
 
 #ifdef __cplusplus
 }

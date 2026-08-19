@@ -38,6 +38,7 @@
 #include "bms_balance_rtt.h"
 #include "soc_estimator.h"
 #include "soh_estimator.h"
+#include "low_power_consumption.h"
 #include "bms_lin_config.h"
 #include "soft_start.h"
 #include "uart_battery_report.h"
@@ -60,8 +61,6 @@
 #define BMS_TASK_PERIOD_MS                500U
 #define LIN_CHARGER_PROCESS_MS            100U
 #define POWER_TASK_PERIOD_MS              200U
-#define BUZZER_LOW_BATT_BEEPS               6U
-#define BUZZER_LOW_BATT_PERIOD_MS        8000U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -212,7 +211,6 @@ void StartCommonTaskCommon(void *argument)
 {
   /* USER CODE BEGIN CommTask */
   (void)argument;
-  /* BootSequence 已在 main 里开 12V；LIN 驱动也在 main 里尽早 Init。 */
 #if !BMS_LIN_DIAG_TX_ENABLE
   LinCharger_Init();
   LinDriver_Init();
@@ -313,7 +311,7 @@ void StartPowerTask(void *argument)
       BSP_AdcRails_Update();
       BSP_PowerRails_Process();
       ChargePath_Apply();
-      BSP_Buzzer_Process(POWER_TASK_PERIOD_MS);
+      Buzzer_AlarmProcess(POWER_TASK_PERIOD_MS);
     }
     osDelay(POWER_TASK_PERIOD_MS);
   }
@@ -331,7 +329,6 @@ void StartBmsTask(void *argument)
 {
   /* USER CODE BEGIN BmsTask */
   static bool s_bq_prot_read = false;
-  static uint32_t s_low_batt_beep_ms = 0U;
   (void)argument;
 
   while (!SoftStart_IsSystemReady() && !SoftStart_IsBootFault())
@@ -353,6 +350,7 @@ void StartBmsTask(void *argument)
   Balance_Init();
   Soc_Init();
   Soh_Init();
+  LowPower_Init();
 
   if (!SoftStart_IsBqCalibrated())
   {
@@ -402,32 +400,18 @@ void StartBmsTask(void *argument)
       uint8_t status_c = 0U;
       bool ok = BQ76942_ReadSafetyStatusEx(&hi2c2, &status_a, &status_b,
                                           &status_c);
+      const lin_charger_status_t *charger = LinCharger_GetStatus();
+      bool charger_connected =
+          (charger != NULL) && (!charger->comm_lost) &&
+          (charger->session != LIN_SESSION_IDLE);
+
       BSP_PowerRails_UpdateBqSafety(status_a, status_b, status_c, ok);
       CellVoltageProtect_Process(status_a, ok, &s_bq_meas);
-
-      /* 低电量：立刻响 6 声，之后每 8s 再响 6 声。
-       * 只用去抖后的低电量预警，不用 CUV：断电瞬间 BQ 可能误报 CUV。 */
-      {
-        bool low_batt = CellVoltageProtect_IsLowVoltageWarn();
-
-        if (low_batt)
-        {
-          if (s_low_batt_beep_ms == 0U)
-          {
-            BSP_Buzzer_PlayBeeps(BUZZER_LOW_BATT_BEEPS);
-          }
-
-          s_low_batt_beep_ms += BMS_TASK_PERIOD_MS;
-          if (s_low_batt_beep_ms >= BUZZER_LOW_BATT_PERIOD_MS)
-          {
-            s_low_batt_beep_ms = 0U;
-          }
-        }
-        else
-        {
-          s_low_batt_beep_ms = 0U;
-        }
-      }
+      LowPower_Process(&hi2c2, &s_bq_meas, ok,
+                       ok && ((status_a != 0U) ||
+                              (status_b != 0U) ||
+                              (status_c != 0U)),
+                       charger_connected);
     }
 
     ChargePath_Apply();

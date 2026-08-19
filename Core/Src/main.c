@@ -122,8 +122,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   /* FET-off safe defaults before rails come up (active-high inhibit). */
-  HAL_GPIO_WritePin(BQ_CFETOFF_GPIO_Port, BQ_CFETOFF_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(BQ_DFETOFF_GPIO_Port, BQ_DFETOFF_Pin, GPIO_PIN_SET);
   BSP_PowerRails_PreBoot();
   MX_GPDMA1_Init();
   MX_ADC1_Init();

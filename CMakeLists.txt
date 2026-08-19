@@ -73,6 +73,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/lin_diag_tx.c
     User_APP/src/soc_estimator.c
     User_APP/src/soh_estimator.c
+    User_APP/src/low_power_consumption.c
     "${SEGGER_RTT_DIR}/SEGGER_RTT.c"
     "${SEGGER_RTT_DIR}/SEGGER_RTT_printf.c"
 )

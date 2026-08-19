@@ -724,7 +724,7 @@ void BSP_PowerRails_Init(void)
     PowerRails_ApplyActuators();
   }
 }
-
+/*关闭全部电源轨*/
 void BSP_PowerRails_PreBoot(void)
 {
   GPIO_InitTypeDef gpio = {0};
@@ -752,7 +752,6 @@ void BSP_PowerRails_PreBoot(void)
   }
 
   PowerRails_DriveMask(0U);
-  PowerRails_Hold24VOff();
 }
 /*打开电源轨*/
 bool BSP_PowerRails_EnableRail(pwr_rail_id_t rail, bool on)
@@ -897,33 +896,6 @@ bool BSP_PowerRails_IsBootComplete(void)
   return s_boot_complete;
 }
 
-void BSP_PowerRails_BootSequence(void)
-{
-  uint8_t i;
-
-  PowerRails_DriveMask(0U);
-  PowerRails_Hold24VOff();
-
-  PowerRails_WriteGpio(PWR_RAIL_12V, true);
-  s_pwr_rails_status.rail_on[PWR_RAIL_12V] = true;
-  HAL_Delay(300);
-
-  PowerRails_WriteGpio(PWR_RAIL_6V5, true);
-  s_pwr_rails_status.rail_on[PWR_RAIL_6V5] = true;
-  s_pwr_rails_status.rail_on[PWR_RAIL_5V] = true;
-  HAL_Delay(200);
-
-  PowerRails_WriteGpio(PWR_RAIL_19V, true);
-  s_pwr_rails_status.rail_on[PWR_RAIL_19V] = true;
-
-  s_pwr_rails_status.enabled_mask = PWR_MASK_ALL;
-  s_pwr_rails_status.power_rails_mask = PWR_MASK_ALL;
-  for (i = 0U; i < (uint8_t)PWR_REQ_COUNT; i++)
-  {
-    s_request_mask[i] = PWR_MASK_ALL;
-  }
-}
-
 void BSP_PowerRails_UpdateBqSafety(uint8_t status_a, uint8_t status_b,
                                    uint8_t status_c, bool valid)
 {
@@ -967,6 +939,16 @@ const pwr_rails_status_t *BSP_PowerRails_GetStatus(void)
 pwr_state_t BSP_PowerRails_GetState(void)
 {
   return s_pwr_rails_status.state;
+}
+
+pwr_state_t BSP_PowerRails_GetThermalState(void)
+{
+  return s_thermal_state;
+}
+
+pwr_reason_t BSP_PowerRails_GetThermalReason(void)
+{
+  return s_thermal_reason;
 }
 
 bool BSP_PowerRails_ClearFault(void)

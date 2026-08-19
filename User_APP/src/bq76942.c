@@ -21,6 +21,25 @@ static const osMutexAttr_t s_i2c_mutex_attr = {
   .attr_bits = osMutexRecursive | osMutexPrioInherit,
 };
 
+static bq76942_meas_t s_meas_filter;
+static bool s_meas_filter_inited;
+
+static uint32_t Bq76942_FilterU32(uint32_t previous, uint32_t sample)
+{
+  int64_t delta = (int64_t)sample - (int64_t)previous;
+
+  return (uint32_t)((int64_t)previous +
+                    (delta / (int64_t)(1UL << BQ76942_MEAS_FILTER_SHIFT)));
+}
+
+static int16_t Bq76942_FilterS16(int16_t previous, int16_t sample)
+{
+  int32_t delta = (int32_t)sample - (int32_t)previous;
+
+  return (int16_t)((int32_t)previous +
+                   (delta / (int32_t)(1UL << BQ76942_MEAS_FILTER_SHIFT)));
+}
+
 void BQ76942_LockInit(void)
 {
   if (s_i2c_mutex == NULL)
@@ -698,6 +717,16 @@ static bool BQ76942_WriteVcellMode(I2C_HandleTypeDef *hi2c, uint16_t mode)
   return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_VCELL_MODE, block, 2U);
 }
 
+static bool BQ76942_WriteSleepCurrent(I2C_HandleTypeDef *hi2c,
+                                      uint16_t sleep_current_ma)
+{
+  uint8_t block[2];
+
+  block[0] = (uint8_t)(sleep_current_ma & 0xFFU);
+  block[1] = (uint8_t)((sleep_current_ma >> 8) & 0xFFU);
+  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_SLEEP_CURRENT, block, 2U);
+}
+
 static bool BQ76942_WriteFetPredischargeConfig(I2C_HandleTypeDef *hi2c);
 
 bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
@@ -732,6 +761,7 @@ bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
   ok = BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
   ok = ok && BQ76942_WriteCcGain(hi2c, cc_gain);
   ok = ok && BQ76942_WriteVcellMode(hi2c, BQ76942_VCELL_MODE);
+  ok = ok && BQ76942_WriteSleepCurrent(hi2c, BQ76942_SLEEP_CURRENT_MA);
   ok = ok && BQ76942_WriteProtectionConfig(hi2c);
   ok = ok && BQ76942_WriteTs2Config(hi2c, BQ76942_TS2_CONFIG_REPORT_ONLY);
   ok = ok && BQ76942_WriteFetPredischargeConfig(hi2c);
@@ -749,19 +779,19 @@ out:
 
 bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out)
 {
+  bq76942_meas_t sample;
   uint16_t raw_u16;
   int16_t raw_s16;
-  uint16_t vmin = 0xFFFFU;
-  uint16_t vmax = 0U;
   uint8_t i;
   bool ok = false;
 
-  if (out == NULL)
+  if ((hi2c == NULL) || (out == NULL))
   {
     return false;
   }
 
   out->valid = false;
+  (void)memset(&sample, 0, sizeof(sample));
 
   if (!BQ76942_I2cLock())
   {
@@ -775,44 +805,36 @@ bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out)
       goto out;
     }
 
-    out->cell_mv[i] = raw_u16;
-    if (raw_u16 < vmin)
-    {
-      vmin = raw_u16;
-    }
-    if (raw_u16 > vmax)
-    {
-      vmax = raw_u16;
-    }
+    sample.cell_mv[i] = raw_u16;
   }
 
   if (!BQ76942_ReadDirectU16(hi2c, BQ76942_CMD_STACK_VOLTAGE, &raw_u16))
   {
     goto out;
   }
-  out->pack_mv = BQ76942_UserVToMv(raw_u16);
+  sample.pack_mv = BQ76942_UserVToMv(raw_u16);
 
   if (!BQ76942_ReadDirectU16(hi2c, BQ76942_CMD_PACK_VOLTAGE, &raw_u16))
   {
     goto out;
   }
-  out->output_mv = BQ76942_UserVToMv(raw_u16);
+  sample.output_mv = BQ76942_UserVToMv(raw_u16);
 
   if (!BQ76942_ReadDirectU16(hi2c, BQ76942_CMD_LD_VOLTAGE, &raw_u16))
   {
     goto out;
   }
-  out->ld_mv = BQ76942_UserVToMv(raw_u16);
+  sample.ld_mv = BQ76942_UserVToMv(raw_u16);
 
   if (!BQ76942_ReadDirectS16(hi2c, BQ76942_CMD_CC2_CURRENT, &raw_s16))
   {
     goto out;
   }
-  out->current_ma = raw_s16;
+  sample.current_ma = raw_s16;
 
-  /* CC3: averaged CC2 samples via DASTATUS5 bytes 20–21. */
+  /* CC3/CC1 current via DASTATUS5 bytes 20–23. */
   {
-    uint8_t dastatus5[BQ76942_DASTATUS5_CC3_OFFSET + 2U];
+    uint8_t dastatus5[BQ76942_DASTATUS5_CC1_OFFSET + 2U];
 
     if (!BQ76942_SubCommandRead(hi2c, BQ76942_SUBCMD_DASTATUS5,
                                 dastatus5, (uint8_t)sizeof(dastatus5)))
@@ -820,20 +842,66 @@ bool BQ76942_ReadMeasurements(I2C_HandleTypeDef *hi2c, bq76942_meas_t *out)
       goto out;
     }
 
-    out->current_cc3_ma = (int16_t)((uint16_t)dastatus5[BQ76942_DASTATUS5_CC3_OFFSET] |
-                                    ((uint16_t)dastatus5[BQ76942_DASTATUS5_CC3_OFFSET + 1U] << 8));
+    sample.current_cc3_ma =
+        (int16_t)((uint16_t)dastatus5[BQ76942_DASTATUS5_CC3_OFFSET] |
+                  ((uint16_t)dastatus5[BQ76942_DASTATUS5_CC3_OFFSET + 1U] << 8));
+    sample.current_cc1_ma =
+        (int16_t)((uint16_t)dastatus5[BQ76942_DASTATUS5_CC1_OFFSET] |
+                  ((uint16_t)dastatus5[BQ76942_DASTATUS5_CC1_OFFSET + 1U] << 8));
   }
 
-  out->vcell_min_mv = vmin;
-  out->vcell_max_mv = vmax;
-  out->valid = true;
+  if (!s_meas_filter_inited)
+  {
+    s_meas_filter = sample;
+    s_meas_filter_inited = true;
+  }
+  else
+  {
+    for (i = 0U; i < BQ76942_CELL_COUNT; i++)
+    {
+      s_meas_filter.cell_mv[i] =
+          (uint16_t)Bq76942_FilterU32(s_meas_filter.cell_mv[i],
+                                     sample.cell_mv[i]);
+    }
+    s_meas_filter.pack_mv =
+        Bq76942_FilterU32(s_meas_filter.pack_mv, sample.pack_mv);
+    s_meas_filter.output_mv =
+        Bq76942_FilterU32(s_meas_filter.output_mv, sample.output_mv);
+    s_meas_filter.ld_mv =
+        Bq76942_FilterU32(s_meas_filter.ld_mv, sample.ld_mv);
+    s_meas_filter.current_ma =
+        Bq76942_FilterS16(s_meas_filter.current_ma, sample.current_ma);
+    s_meas_filter.current_cc3_ma =
+        Bq76942_FilterS16(s_meas_filter.current_cc3_ma,
+                          sample.current_cc3_ma);
+    s_meas_filter.current_cc1_ma =
+        Bq76942_FilterS16(s_meas_filter.current_cc1_ma,
+                          sample.current_cc1_ma);
+  }
+
+  s_meas_filter.vcell_min_mv = 0xFFFFU;
+  s_meas_filter.vcell_max_mv = 0U;
+  for (i = 0U; i < BQ76942_CELL_COUNT; i++)
+  {
+    if (s_meas_filter.cell_mv[i] < s_meas_filter.vcell_min_mv)
+    {
+      s_meas_filter.vcell_min_mv = s_meas_filter.cell_mv[i];
+    }
+    if (s_meas_filter.cell_mv[i] > s_meas_filter.vcell_max_mv)
+    {
+      s_meas_filter.vcell_max_mv = s_meas_filter.cell_mv[i];
+    }
+  }
+
+  s_meas_filter.valid = true;
+  *out = s_meas_filter;
   ok = true;
 
 out:
   BQ76942_I2cUnlock();
   return ok;
 }
-
+/*自检读电压值*/
 bool BQ76942_ReadStackOutputMv(I2C_HandleTypeDef *hi2c, uint32_t *stack_mv,
                                uint32_t *output_mv)
 {
