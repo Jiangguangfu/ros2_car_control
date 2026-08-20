@@ -38,6 +38,35 @@ static uint8_t s_bq_protect_clear_count;
 static bool s_inited;
 static bool s_lin_charge_expect;
 
+static charge_fault_reason_t ChargeManager_MapPowerFault(
+    const pwr_rails_status_t *pwr)
+{
+  if (pwr == NULL)
+  {
+    return CHARGE_FAULT_NONE;
+  }
+
+  switch (pwr->reason)
+  {
+    case PWR_REASON_OCC:
+    case PWR_REASON_SOFT_OCD:
+      return CHARGE_FAULT_OVERCURRENT;
+
+    case PWR_REASON_SCD:
+    case PWR_REASON_OCD:
+      return CHARGE_FAULT_BQ_PROTECT;
+
+    case PWR_REASON_HOT:
+    case PWR_REASON_COLD_CHARGE:
+    case PWR_REASON_SENSOR:
+      return CHARGE_FAULT_THERMAL;
+
+    case PWR_REASON_NONE:
+    default:
+      return CHARGE_FAULT_NONE;
+  }
+}
+
 static void ChargeManager_SetFault(charge_fault_reason_t reason)
 {
   s_status.state = CHARGE_STATE_FAULT;
@@ -273,7 +302,9 @@ static void ChargeManager_CheckFaults(I2C_HandleTypeDef *hi2c)
 
   if ((thermal != NULL) && (thermal->state == PWR_STATE_FAULT))
   {
-    ChargeManager_SetFault(CHARGE_FAULT_THERMAL);
+    charge_fault_reason_t reason = ChargeManager_MapPowerFault(thermal);
+    ChargeManager_SetFault((reason != CHARGE_FAULT_NONE) ?
+                           reason : CHARGE_FAULT_BQ_PROTECT);
     return;
   }
 
@@ -301,7 +332,10 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
     {
       if (BSP_PowerRails_GetState() == PWR_STATE_FAULT)
       {
-        ChargeManager_SetFault(CHARGE_FAULT_THERMAL);
+        const pwr_rails_status_t *pwr = BSP_PowerRails_GetStatus();
+        charge_fault_reason_t reason = ChargeManager_MapPowerFault(pwr);
+        ChargeManager_SetFault((reason != CHARGE_FAULT_NONE) ?
+                               reason : CHARGE_FAULT_BQ_PROTECT);
       }
     }
     return;

@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/app_freertos.c
     User_APP/src/soft_start.c
     User_APP/src/bms_can_tx.c
+    User_APP/src/bms_can_rx.c
     User_APP/src/bms_can_ext_tx.c
     User_APP/src/bms_can_balance_tx.c
     User_APP/src/bms_data_snapshot.c

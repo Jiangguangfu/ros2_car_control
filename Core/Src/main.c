@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bms_can_tx.h"
+#include "bms_can_rx.h"
 #include "bms_can_ext_tx.h"
 #include "bms_can_balance_tx.h"
 #include "bms_balance_rtt.h"
@@ -139,6 +140,7 @@ int main(void)
   BMS_CanTx_Init();
   BMS_CanExtTx_Init();
   BMS_CanBalanceTx_Init();
+  BMS_CanRx_Init();
   SEGGER_RTT_Init();
   BmsBalanceRtt_Init();
 #if !BMS_LIN_DIAG_TX_ENABLE
@@ -411,7 +413,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
   hfdcan1.Init.DataTimeSeg2 = 1;
-  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.StdFiltersNbr = 1;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)

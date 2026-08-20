@@ -13,8 +13,12 @@
 #include "charge_path.h"
 #include "cmsis_os2.h"
 #include "soft_start.h"
+#include "uart_charge_ctrl.h"
 
 #define LIN_SERIES_CELLS              6u
+/* Safe boot target for a 1 A current-limited bench supply.  The 407 may
+ * raise it later with a validated 0x441 command. */
+#define LIN_INITIAL_CHARGE_MA          600u
 
 typedef struct
 {
@@ -22,8 +26,12 @@ typedef struct
   bool comm_lost;
   uint16_t v_allow_mv;
   uint16_t i_allow_ma;
+  uint16_t target_charge_ma;
   uint32_t last_master_ms;
   bool inited;
+  /* 407 STOP is a supervisory safety command.  Keep it latched so periodic
+   * LIN START/VI requests from the charger cannot immediately restart. */
+  bool remote_stop_latched;
 } lin_charger_ctx_t;
 
 static lin_charger_ctx_t s_lin;
@@ -48,7 +56,12 @@ static void lin_touch_master(uint32_t now_ms)
 static uint16_t lin_compute_i_limit_ma(void)
 {
   const pwr_rails_status_t *pwr = BSP_PowerRails_GetStatus();
-  uint16_t limit = LIN_IMAX_DEFAULT_MA;
+  uint16_t limit = s_lin.target_charge_ma;
+
+  if (limit == 0U)
+  {
+    limit = LIN_INITIAL_CHARGE_MA;
+  }
 
   if ((pwr != NULL) && (pwr->state >= PWR_STATE_LIMIT))
   {
@@ -262,7 +275,8 @@ static bool lin_handle_vi_request(const uint8_t *data, uint8_t len,
   s_lin.i_allow_ma = rsp_pkt.i_allow_ma;
   lin_set_session(LIN_SESSION_VI_OK);
 
-  if ((req->flags & LIN_VI_FLAG_REQUEST_START) != 0U)
+  if (((req->flags & LIN_VI_FLAG_REQUEST_START) != 0U) &&
+      !s_lin.remote_stop_latched)
   {
     (void)ChargeManager_Start();
     if (ChargeManager_GetState() == CHARGE_STATE_CHARGING)
@@ -292,7 +306,7 @@ static bool lin_handle_charge_ctrl(const uint8_t *data, uint8_t len)
     return false;
   }
 
-  if (req->cmd == LIN_CHARGE_CTRL_START)
+  if ((req->cmd == LIN_CHARGE_CTRL_START) && !s_lin.remote_stop_latched)
   {
     if (ChargeManager_Start())
     {
@@ -355,7 +369,9 @@ void LinCharger_Init(void)
   s_lin.comm_lost = false;
   s_lin.v_allow_mv = LIN_PACK_VMAX_MV;
   s_lin.i_allow_ma = LIN_IMAX_DEFAULT_MA;
+  s_lin.target_charge_ma = LIN_INITIAL_CHARGE_MA;
   s_lin.last_master_ms = osKernelGetTickCount();
+  s_lin.remote_stop_latched = false;
   s_lin.inited = true;
 
   ChargePath_SetLinCommInhibit(false);
@@ -375,6 +391,7 @@ void LinCharger_Process(void)
    * Ready 后在任务上下文补一次 Start，不改缓启动步骤。 */
   if (SoftStart_IsSystemReady() &&
       (s_lin.session >= LIN_SESSION_VI_OK) &&
+      !s_lin.remote_stop_latched &&
       (ChargeManager_GetState() == CHARGE_STATE_IDLE))
   {
     if (ChargeManager_Start())
@@ -477,6 +494,60 @@ bool LinCharger_OnMasterFrame(uint8_t pid, const uint8_t *data, uint8_t len,
   }
 
   return has_rsp;
+}
+
+void LinCharger_ApplyCanCommand(uint8_t cmd, uint16_t i_target_ma)
+{
+  if (!s_lin.inited)
+  {
+    LinCharger_Init();
+  }
+
+  switch (cmd)
+  {
+    case UART_CHARGE_CTRL_SET_CURRENT:
+      if (uart_charge_current_is_valid(i_target_ma))
+      {
+        s_lin.target_charge_ma = i_target_ma;
+      }
+      break;
+
+    case UART_CHARGE_CTRL_START:
+      if (!uart_charge_current_is_valid(i_target_ma))
+      {
+        break;
+      }
+      else
+      {
+        s_lin.target_charge_ma = i_target_ma;
+      }
+      s_lin.remote_stop_latched = false;
+      if (ChargeManager_GetState() == CHARGE_STATE_FAULT)
+      {
+        (void)ChargeManager_ClearFault();
+      }
+      if (ChargeManager_Start())
+      {
+        lin_set_session(LIN_SESSION_ACTIVE);
+      }
+      break;
+
+    case UART_CHARGE_CTRL_STOP:
+      if (i_target_ma != 0U)
+      {
+        break;
+      }
+      s_lin.remote_stop_latched = true;
+      ChargeManager_Stop();
+      if (s_lin.session > LIN_SESSION_VI_OK)
+      {
+        lin_set_session(LIN_SESSION_VI_OK);
+      }
+      break;
+
+    default:
+      break;
+  }
 }
 
 const lin_charger_status_t *LinCharger_GetStatus(void)

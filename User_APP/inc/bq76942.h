@@ -140,7 +140,7 @@ extern "C" {
 #define BQ76942_OCC_THRESHOLD             0x02U /* 2×2 mV = 4 mV → 4 A @ 1 mΩ */
 #endif
 #ifndef BQ76942_OCC_DELAY
-#define BQ76942_OCC_DELAY                 0x04U /* ≈20 ms */
+#define BQ76942_OCC_DELAY                 0x0DU /* 3.3 ms × (2+13) ≈50 ms */
 #endif
 #ifndef BQ76942_OCD1_THRESHOLD
 #define BQ76942_OCD1_THRESHOLD            0x04U /* TRM default, 8 mV */

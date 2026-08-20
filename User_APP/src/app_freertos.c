@@ -35,6 +35,7 @@
 #include "bms_can_debug.h"
 #include "bms_can_ext_tx.h"
 #include "bms_can_balance_tx.h"
+#include "bms_can_rx.h"
 #include "bms_balance_rtt.h"
 #include "soc_estimator.h"
 #include "soh_estimator.h"
@@ -231,6 +232,7 @@ void StartCommonTaskCommon(void *argument)
 #if !BMS_LIN_DIAG_TX_ENABLE
     LinDriver_Poll();
     LinCharger_Process();
+    BMS_CanRx_Process();
 #endif
 #if BMS_LIN_DIAG_TX_ENABLE
     LinDiagTx_Poll();

@@ -33,6 +33,7 @@ BMS（STM32U385）通过 **FDCAN1** 向底盘主控上报电池数据。本板 *
 | `0x8B` | **0x48B** | 20 B | **4** | **5 Hz**（200 ms） | 电池状态（主包） |
 | `0x9A` | **0x49A** | 32 B | **6** | **1 Hz** + 告警变化即发 | 告警 + 扩展测量 |
 | `0x9B` | **0x49B** | 8 B | **2** | **1 Hz** + state/mask 变化即发 | 均衡状态监控 |
+| `0x41` | **0x441** | 3 B | **1** | **407 下发** | 充电控制（设流 / 启停） |
 | — | 0x48C–0x48F | 8 B × 4 | 1 帧/ID | 5 Hz | **仅联调**（`BMS_CAN_DEBUG=ON`） |
 
 > **注意**：`0x48C`–`0x48F` 为调试帧，与 TYPE `0x8C` 路由规则无关；**量产固件默认关闭**。
@@ -189,6 +190,25 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 
 ---
 
+## 0x441 — SET_CHARGE_CTRL（TYPE 0x41，407 → BMS）
+
+**用途**：底盘经 CAN 远程设充电电流、开始/停止充电。
+
+**结构体**：`uart_charge_ctrl_cmd_t`（`uart_charge_ctrl.h`）
+
+| 偏移 | 字段 | 类型 | 说明 |
+|------|------|------|------|
+| 0 | `cmd` | uint8 | `0` 仅设电流；`1` 开始；`2` 停止 |
+| 1–2 | `i_target_ma` | uint16 LE | 目标 mA：400–3000，50 mA 步进；STOP 必须为 0 |
+
+**407 侧**：UART `SET_CHARGE_CTRL (0x41)` → `BMS_Can_SendChargeCtrl()` 发 CAN **0x441**（单帧，DLC 5）。
+
+**BMS 侧**：`bms_can_rx.c` 收帧 → `LinCharger_ApplyCanCommand()` 更新 `target_charge_ma`；LIN 状态轮询里 `i_allow_ma = min(target, 保护上限, 充电桩 VI 能力)` → 充电桩跟流。
+
+**联调**：PC 串口连 407（CDC/UART6），发完整 UART 帧；600 mA 开始示例见 PawDrive `docs/UART_PROTOCOL.md` §10.5。
+
+---
+
 ## 联调调试帧（可选，默认关闭）
 
 编译时 `-DBMS_CAN_DEBUG=ON`（CMake `option(BMS_CAN_DEBUG)`）启用 `0x48C`–`0x48F`，周期与 0x48B 相同（5 Hz）。
@@ -216,6 +236,7 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 | 扩展快照 | `User_APP/src/bms_ext_snapshot.c` | 告警 + 扩展 → 0x9A |
 | 均衡快照 | `User_APP/src/bms_balance_snapshot.c` | `Balance_GetStatus()` → 0x9B |
 | CAN 发送 | `User_APP/src/bms_can_tx.c` | 0x48B |
+| CAN 接收 | `User_APP/src/bms_can_rx.c` | **0x441** 充电控制 |
 | CAN 扩展发送 | `User_APP/src/bms_can_ext_tx.c` | 0x49A |
 | CAN 均衡发送 | `User_APP/src/bms_can_balance_tx.c` | 0x49B |
 | 均衡 RTT | `User_APP/src/bms_balance_rtt.c` | J-Link RTT 文本 |
@@ -255,6 +276,7 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v0.5 | 2026-08 | 新增 **407 → BMS** `0x441`（UART `0x41`）充电控制；FDCAN RX + `target_charge_ma` |
 | v0.4 | 2026-08 | 新增 **0x49B**（TYPE 0x9B）均衡监控；LIN PID 0x33；RTT 打印；0x49A 增加 BALANCING / DELTA_HIGH |
 | v0.3 | 2026-03 | 新增 **0x49A**（TYPE 0x9A）告警与扩展测量；BMS 文档初版 |
 | v0.2 | — | 弃用自定义 0x180/0x181，改为 UART 0x8B 分片 → 0x48B |

@@ -27,6 +27,7 @@ typedef struct
   bool comm_lost;           /* 1 s 无 Master 帧 */
   uint16_t v_allow_mv;
   uint16_t i_allow_ma;
+  uint16_t target_charge_ma;
   uint32_t last_master_ms;
 } lin_charger_status_t;
 
@@ -49,6 +50,9 @@ bool LinCharger_OnMasterFrame(uint8_t pid, const uint8_t *data, uint8_t len,
 
 const lin_charger_status_t *LinCharger_GetStatus(void);
 bool LinCharger_IsCommLost(void);
+
+/** 407 CAN 0x441：设目标电流 / 启停充电。 */
+void LinCharger_ApplyCanCommand(uint8_t cmd, uint16_t i_target_ma);
 
 #ifdef __cplusplus
 }
