@@ -12,6 +12,7 @@
 #include "bq76942.h"
 #include "app_freertos.h"
 #include "cmsis_os2.h"
+#include "SEGGER_RTT.h"
 
 /* 6S NMC 阈值，可按电芯规格标定 */
 #define CHARGE_CELL_CV_ENTER_MV           4150U  /* CC → CV */
@@ -133,6 +134,10 @@ static void ChargeManager_EnterCompleted(void)
   ChargePath_SetChargeManagerInhibit(true);
   ChargePath_Apply();
   Balance_SetChargerPresent(true);
+  {
+    charge_gate_result_t gate = { CHARGE_REJECT_FULL, CHG_INH_FULL };
+    ChargeManager_StoreReject(&gate);
+  }
 }
 
 static bool ChargeManager_EnsureChargeFet(I2C_HandleTypeDef *hi2c)
@@ -363,6 +368,8 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
         gate.code = CHARGE_REJECT_NO_CURRENT;
         gate.mask = CHG_INH_NO_CURRENT;
         ChargeManager_StoreReject(&gate);
+        (void)SEGGER_RTT_printf(0, "CHG no_current after ACK (%s)\r\n",
+                                ChargeReject_ReasonText(CHARGE_REJECT_NO_CURRENT));
         /* 实验室电源无 LIN：无流判故障。充电桩：保持使能，上报「开关开了但没充上」。 */
         if (!s_lin_charge_expect)
         {

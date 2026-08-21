@@ -11,6 +11,7 @@
 #include "bsp_power_rails.h"
 #include "charge_manager.h"
 #include "charge_path.h"
+#include "bms_can_charge_cmd.h"
 #include "cmsis_os2.h"
 #include "soft_start.h"
 #include "uart_charge_ctrl.h"
@@ -102,6 +103,10 @@ static uint8_t lin_map_charge_state(void)
   switch (chg->state)
   {
     case CHARGE_STATE_CHARGING:
+      if (chg->no_current_after_ack)
+      {
+        return LIN_CHG_STATUS_PAUSED;
+      }
       if (chg->charge_paused || ChargePath_IsLinCommInhibit())
       {
         return LIN_CHG_STATUS_PAUSED;
@@ -164,7 +169,14 @@ static bool lin_build_charge_status(lin_charge_status_t *out)
   out->phase = lin_map_charge_phase();
   out->i_allow_ma = lin_compute_i_limit_ma();
   out->pack_mv = (chg != NULL) ? (uint16_t)chg->pack_mv : 0U;
-  out->fault_code = (chg != NULL) ? (uint8_t)chg->fault_reason : 0U;
+  if ((chg != NULL) && chg->no_current_after_ack)
+  {
+    out->fault_code = (uint8_t)CHARGE_FAULT_NO_CURRENT;
+  }
+  else
+  {
+    out->fault_code = (chg != NULL) ? (uint8_t)chg->fault_reason : 0U;
+  }
   return true;
 }
 
@@ -530,6 +542,7 @@ void LinCharger_ApplyCanCommand(uint8_t cmd, uint16_t i_target_ma)
       {
         lin_set_session(LIN_SESSION_ACTIVE);
       }
+      BMS_CanChargeCmd_NotifyHost();
       break;
 
     case UART_CHARGE_CTRL_STOP:
@@ -543,6 +556,7 @@ void LinCharger_ApplyCanCommand(uint8_t cmd, uint16_t i_target_ma)
       {
         lin_set_session(LIN_SESSION_VI_OK);
       }
+      BMS_CanChargeCmd_NotifyHost();
       break;
 
     default:

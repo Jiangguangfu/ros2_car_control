@@ -13,12 +13,15 @@
 bool enable
 uint32 request_id
 ---
-bool accepted
-bool charging
+bool accepted          # 仲裁通过，开关已开
+bool charging          # 电流已确认（≠ accepted）
+bool waiting           # ACK 后等待出流
+bool no_flow           # 开关开了但没充上
 bool paused
 uint8 reject_code
 uint16 inhibit_mask
 uint8 state
+string reason          # ChargeReject_ReasonText
 ```
 
 `reject_code` 与固件 `charge_reject_t` 一致：
@@ -38,6 +41,7 @@ uint8 state
 | 10 | LIN 丢帧 |
 | 11 | 充电桩未就绪（未 V/I 协商或无桩） |
 | 12 | 充电故障未恢复 |
+| 13 | BQ Safety 锁存 |
 | 14 | 命令已接受但超时无充电电流（接触不良 / 桩没电等） |
 
 ## 命令成功 ≠ 正在充电
@@ -75,11 +79,15 @@ ros2 service call /bms/charge_enable bms_msgs/srv/ChargeEnable "{enable: false, 
 ros2 service call /bms/charge_query bms_msgs/srv/ChargeEnable "{enable: false, request_id: 3}"
 ```
 
-看状态（有周期 Topic 时）：
+看状态（应常开，不要只在出问题时才 echo）：
 
 ```bash
 ros2 topic echo /bms/charge_status
+ros2 topic echo /battery_state
 ```
+
+`/bms/charge_status` 建议字段：`accepted, charging, waiting, no_flow, reject_code, reason`。  
+`/battery_state` 的 `power_supply_status` 按上表从 0x48B `reserved1` 映射。
 
 成功：`accepted: true` 只表示命令通过。正在充电还需 `charging: true`（或 0x48B bit2 / `current_a <= -0.05`）。  
 若 `accepted: true` 且随后 `no_flow` / `reject_code: 14`：开关已开但没充上。  

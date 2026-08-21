@@ -260,6 +260,13 @@ void BMS_CanChargeCmd_PublishStatus(void)
                            chg->user_start_request != false);
 }
 
+void BMS_CanChargeCmd_NotifyHost(void)
+{
+  s_last_pub_flags = 0xFFU;
+  s_last_pub_reject = 0xFFU;
+  BMS_CanChargeCmd_PublishStatus();
+}
+
 void BMS_CanChargeCmd_Process(void)
 {
   uint8_t data[8];

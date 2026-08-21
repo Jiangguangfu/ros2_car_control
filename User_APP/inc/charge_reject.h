@@ -49,6 +49,29 @@ typedef struct
   uint16_t mask;
 } charge_gate_result_t;
 
+static inline const char *ChargeReject_ReasonText(charge_reject_t code)
+{
+  switch (code)
+  {
+    case CHARGE_REJECT_NONE:         return "ok";
+    case CHARGE_REJECT_FULL:         return "already_full";
+    case CHARGE_REJECT_MEAS:         return "meas_invalid";
+    case CHARGE_REJECT_COMM:         return "bq_comm_fail";
+    case CHARGE_REJECT_OVERCURRENT:  return "overcurrent";
+    case CHARGE_REJECT_THERMAL:      return "thermal";
+    case CHARGE_REJECT_COLD:         return "cold_charge";
+    case CHARGE_REJECT_OVERVOLT:     return "overvolt";
+    case CHARGE_REJECT_UNDERVOLT:    return "undervolt";
+    case CHARGE_REJECT_IMBALANCE:    return "imbalance";
+    case CHARGE_REJECT_LIN_COMM:     return "lin_timeout";
+    case CHARGE_REJECT_LIN_NOT_READY:return "charger_not_ready";
+    case CHARGE_REJECT_FAULT:        return "charge_fault";
+    case CHARGE_REJECT_BQ_PROTECT:   return "bq_protect";
+    case CHARGE_REJECT_NO_CURRENT:   return "cmd_on_no_current";
+    default:                         return "unknown";
+  }
+}
+
 #ifdef __cplusplus
 }
 #endif
