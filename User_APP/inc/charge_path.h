@@ -11,6 +11,8 @@
 #define CHARGE_PATH_H
 
 #include <stdbool.h>
+#include <stdint.h>
+#include "charge_reject.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,9 +38,6 @@ void ChargePath_SetProtectInhibit(bool charge_off, bool discharge_off);
 /** Cell voltage protect: COV stop charge, CUV stop discharge. */
 void ChargePath_SetVoltageInhibit(bool charge_off, bool discharge_off);
 
-/** Cell voltage protect: COV stop charge, CUV stop discharge. */
-void ChargePath_SetVoltageInhibit(bool charge_off, bool discharge_off);
-
 /** LIN 通信超时：暂停充电路径（不断开 CHG 状态机）。 */
 void ChargePath_SetLinCommInhibit(bool charge_off);
 
@@ -55,6 +54,9 @@ bool ChargePath_IsImbalanceChargeInhibit(void);
 bool ChargePath_IsLinCommInhibit(void);
 bool ChargePath_IsChargeInhibited(void);
 bool ChargePath_IsDischargeInhibited(void);
+
+/** 当前充电路径禁止来源（不含 charge_manager 空闲关断） */
+uint16_t ChargePath_GetChargeInhibitMask(void);
 
 #ifdef __cplusplus
 }

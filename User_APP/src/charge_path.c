@@ -117,3 +117,31 @@ bool ChargePath_IsDischargeInhibited(void)
 {
   return s_discharge_inhibited;
 }
+
+uint16_t ChargePath_GetChargeInhibitMask(void)
+{
+  uint16_t mask = 0U;
+
+  if (s_thermal_charge_off)
+  {
+    mask = (uint16_t)(mask | CHG_INH_THERMAL);
+  }
+  if (s_protect_charge_off)
+  {
+    mask = (uint16_t)(mask | CHG_INH_PROTECT);
+  }
+  if (s_voltage_charge_off)
+  {
+    mask = (uint16_t)(mask | CHG_INH_VOLTAGE);
+  }
+  if (s_imbalance_charge_off)
+  {
+    mask = (uint16_t)(mask | CHG_INH_IMBALANCE);
+  }
+  if (s_lin_comm_charge_off)
+  {
+    mask = (uint16_t)(mask | CHG_INH_LIN_COMM);
+  }
+
+  return mask;
+}

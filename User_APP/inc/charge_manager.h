@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "stm32u3xx_hal.h"
+#include "charge_gate.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,12 +70,23 @@ typedef struct
 
   uint8_t cv_taper_count;     /* CV 涓流确认计数 */
   uint32_t charge_elapsed_ms;
+  charge_reject_t last_reject;
+  uint16_t last_reject_mask;
 } charge_status_t;
 
 void ChargeManager_Init(void);
 
 /** 请求启动充电；IDLE/COMPLETED(需电压回落)；可恢复 FAULT 会先清再启。 */
 bool ChargeManager_Start(void);
+
+/**
+ * @param require_charger true = 底板/ROS 开充，需充电桩 LIN 已就绪
+ */
+bool ChargeManager_RequestStart(bool require_charger);
+
+const charge_gate_result_t *ChargeManager_GetLastReject(void);
+void ChargeManager_ClearLastReject(void);
+void ChargeManager_SetLastReject(const charge_gate_result_t *gate);
 
 /** 用户停止充电，回到 IDLE。 */
 void ChargeManager_Stop(void);

@@ -26,6 +26,7 @@ BMS 无对外 UART，电池数据经 **CAN** 与底盘交换（500 kbit/s，FDCA
 | BMS → 407 | **0x49A** | 告警 + 扩展（单体电压、双温、双电流等），1 Hz |
 | BMS → 407 | **0x49B** | 均衡状态（阶段、压差、泄放掩码），1 Hz |
 | 407 → BMS | **0x441** | 充电控制：设目标电流 / 开始 / 停止（UART `0x41` 转发） |
+| 407 → BMS / BMS → 407 | **0x4A0 / 0x4A1** | 充电开停 + 安全仲裁应答（事件） |
 
 协议与 payload 布局详见 **[docs/BMS_CAN.md](docs/BMS_CAN.md)**。远程充电示例见 PawDrive **[UART_PROTOCOL.md](../PawDrive-Base-Controller/docs/UART_PROTOCOL.md)** §10.5。
 
@@ -34,7 +35,7 @@ BMS 无对外 UART，电池数据经 **CAN** 与底盘交换（500 kbit/s，FDCA
 ## 软件架构
 
 ```
-CommTask          — CAN 上报（0x48B / 0x49A / 0x49B）+ CAN 收 0x441 + 均衡 RTT
+CommTask          — CAN 上报（0x48B / 0x49A / 0x49B）+ 收 0x441 / 0x4A0 + 均衡 RTT
 ServiceTask       — 空闲占位（上电时序在 main）
 PowerTask         — bsp_power_rails（200 ms：热 + 过流/短路 + 多电源/风扇）
 BmsTask           — BQ76942 采样 + Safety A/B/C + 均衡/充电/SOC/SOH（500 ms）

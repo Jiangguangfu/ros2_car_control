@@ -36,6 +36,7 @@
 #include "bms_can_ext_tx.h"
 #include "bms_can_balance_tx.h"
 #include "bms_can_rx.h"
+#include "bms_can_charge_cmd.h"
 #include "bms_balance_rtt.h"
 #include "soc_estimator.h"
 #include "soh_estimator.h"
@@ -234,6 +235,7 @@ void StartCommonTaskCommon(void *argument)
     LinCharger_Process();
     BMS_CanRx_Process();
 #endif
+    BMS_CanChargeCmd_Process();
 #if BMS_LIN_DIAG_TX_ENABLE
     LinDiagTx_Poll();
 #endif

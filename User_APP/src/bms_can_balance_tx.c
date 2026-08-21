@@ -5,6 +5,7 @@
 #include "bms_can_balance_tx.h"
 
 #include "bms_balance_snapshot.h"
+#include "bms_can_charge_cmd.h"
 #include "can_uart_transport.h"
 #include "main.h"
 #include "uart_battery_balance_report.h"
@@ -32,10 +33,8 @@ static void BMS_CanBalanceTx_RecoverIfBusOff(void)
   }
 
   (void)HAL_FDCAN_Stop(&hfdcan1);
+  BMS_CanChargeCmd_ApplyFilters();
   (void)HAL_FDCAN_Start(&hfdcan1);
-  (void)HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
-                                     FDCAN_REJECT, FDCAN_REJECT,
-                                     FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
 }
 
 static bool BMS_CanBalanceTx_WaitFifoFree(void)

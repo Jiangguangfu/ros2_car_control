@@ -26,6 +26,7 @@
 #include "bms_can_rx.h"
 #include "bms_can_ext_tx.h"
 #include "bms_can_balance_tx.h"
+#include "bms_can_charge_cmd.h"
 #include "bms_balance_rtt.h"
 #include "bsp_power_rails.h"
 #include "bsp_adc_rails.h"
@@ -133,10 +134,8 @@ int main(void)
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(300);
+  BMS_CanChargeCmd_Init();
   (void)HAL_FDCAN_Start(&hfdcan1);
-  (void)HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
-                                     FDCAN_REJECT, FDCAN_REJECT,
-                                     FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
   BMS_CanTx_Init();
   BMS_CanExtTx_Init();
   BMS_CanBalanceTx_Init();
@@ -413,7 +412,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
   hfdcan1.Init.DataTimeSeg2 = 1;
-  hfdcan1.Init.StdFiltersNbr = 1;
+  hfdcan1.Init.StdFiltersNbr = 2;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)

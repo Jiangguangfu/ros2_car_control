@@ -526,7 +526,7 @@ void LinCharger_ApplyCanCommand(uint8_t cmd, uint16_t i_target_ma)
       {
         (void)ChargeManager_ClearFault();
       }
-      if (ChargeManager_Start())
+      if (ChargeManager_RequestStart(true))
       {
         lin_set_session(LIN_SESSION_ACTIVE);
       }

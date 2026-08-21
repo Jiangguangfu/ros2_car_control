@@ -34,6 +34,8 @@ BMS（STM32U385）通过 **FDCAN1** 向底盘主控上报电池数据。本板 *
 | `0x9A` | **0x49A** | 32 B | **6** | **1 Hz** + 告警变化即发 | 告警 + 扩展测量 |
 | `0x9B` | **0x49B** | 8 B | **2** | **1 Hz** + state/mask 变化即发 | 均衡状态监控 |
 | `0x41` | **0x441** | 3 B | **1** | **407 下发** | 充电控制（设流 / 启停） |
+| `0xA0` | **0x4A0** | 8 B | 1 | 事件 | **充电命令**（底板 → BMS，带仲裁应答） |
+| `0xA1` | **0x4A1** | 8 B | 1 | 应答 | **充电仲裁结果** |
 | — | 0x48C–0x48F | 8 B × 4 | 1 帧/ID | 5 Hz | **仅联调**（`BMS_CAN_DEBUG=ON`） |
 
 > **注意**：`0x48C`–`0x48F` 为调试帧，与 TYPE `0x8C` 路由规则无关；**量产固件默认关闭**。
@@ -192,7 +194,7 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 
 ## 0x441 — SET_CHARGE_CTRL（TYPE 0x41，407 → BMS）
 
-**用途**：底盘经 CAN 远程设充电电流、开始/停止充电。
+**用途**：底盘经 CAN 远程设充电电流、开始/停止充电。开充走 BMS `ChargeGate_Evaluate()`；失败不进入 CHARGING，原因见 `ChargeManager_GetLastReject()` / **0x4A1**。
 
 **结构体**：`uart_charge_ctrl_cmd_t`（`uart_charge_ctrl.h`）
 
@@ -203,9 +205,37 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 
 **407 侧**：UART `SET_CHARGE_CTRL (0x41)` → `BMS_Can_SendChargeCtrl()` 发 CAN **0x441**（单帧，DLC 5）。
 
-**BMS 侧**：`bms_can_rx.c` 收帧 → `LinCharger_ApplyCanCommand()` 更新 `target_charge_ma`；LIN 状态轮询里 `i_allow_ma = min(target, 保护上限, 充电桩 VI 能力)` → 充电桩跟流。
+**BMS 侧**：`bms_can_rx.c` 收帧 → `LinCharger_ApplyCanCommand()` 更新 `target_charge_ma`；START 调用 `ChargeManager_RequestStart(true)`。LIN 状态轮询里 `i_allow_ma = min(target, 保护上限, 充电桩 VI 能力)` → 充电桩跟流。
 
 **联调**：PC 串口连 407（CDC/UART6），发完整 UART 帧；600 mA 开始示例见 PawDrive `docs/UART_PROTOCOL.md` §10.5。
+
+## 0x4A0 / 0x4A1 — 充电命令与安全仲裁应答
+
+**流程**：用户（ROS）发开充/停充 → BMS 安全仲裁 → 通过则充电；失败则 **0xA1 带回主因 `reject_code` + `inhibit_mask`**。停充不仲裁，立即 `Stop()`。
+
+ROS 开充要求 LIN 已完成 V/I 协商（`session >= VI_OK`）且未丢帧。
+
+### 0x4A0 CMD（底板 → BMS，单帧 8 B）
+
+| 偏移 | 字段 | 说明 |
+|------|------|------|
+| 0 | `cmd` | 0=STOP，1=START，2=QUERY |
+| 1 | `seq` | 预留 |
+| 2–3 | `request_id` | uint16 LE，幂等/配对 |
+| 4–7 | 预留 | 0 |
+
+### 0x4A1 RSP（BMS → 底板，单帧 8 B）
+
+| 偏移 | 字段 | 说明 |
+|------|------|------|
+| 0 | `cmd` | 回显 |
+| 1 | `flags` | bit0 `accepted`，bit1 `charging`，bit2 `paused` |
+| 2–3 | `request_id` | 回显 LE |
+| 4 | `reject_code` | `charge_reject_t`，accepted 时为 0 |
+| 5 | `state` | `charge_state_t` |
+| 6–7 | `inhibit_mask` | LE，`CHG_INH_*` |
+
+`reject_code` 见 `User_APP/inc/charge_reject.h`。ROS 接口见 **[ROS_CHARGE.md](ROS_CHARGE.md)**。
 
 ---
 
@@ -240,11 +270,13 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 | CAN 扩展发送 | `User_APP/src/bms_can_ext_tx.c` | 0x49A |
 | CAN 均衡发送 | `User_APP/src/bms_can_balance_tx.c` | 0x49B |
 | 均衡 RTT | `User_APP/src/bms_balance_rtt.c` | J-Link RTT 文本 |
+| CAN 充电命令 | `User_APP/src/bms_can_charge_cmd.c` | 0x4A0 收、0x4A1 回；过滤表 |
+| 充电仲裁 | `User_APP/src/charge_gate.c` | 开充前只读闸门 |
 | LIN 充电/均衡 | `User_APP/src/lin_charger.c` | PID 0x32 充电状态；**0x33** 均衡 8 B |
 | 调试发送 | `User_APP/src/bms_can_debug.c` | 0x48C–0x48F |
 | 任务 | `User_APP/src/app_freertos.c` | `CommTask` 调用发送 |
 
-初始化：`main.c` 中 `BMS_CanTx_Init()`、`BMS_CanExtTx_Init()`、`BMS_CanBalanceTx_Init()`；FDCAN 启动后 `CommTask` 延迟 1.5 s 再发（等电源时序）。
+初始化：`main.c` 中 `BMS_CanChargeCmd_Init()`（过滤 0x441 + 0x4A0）后 `HAL_FDCAN_Start()`；`BMS_CanRx_Init()` 开 RX FIFO 中断。`CommTask` 调用 `BMS_CanRx_Process()` 与 `BMS_CanChargeCmd_Process()`。
 
 ---
 
@@ -255,7 +287,7 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 | 接收 0x48B / TYPE 0x8B | 已有（`PawDrive-Base-Controller`） |
 | 接收 0x49A / TYPE 0x9A | **待同步**（`uart_protocol.h`、`bms_can_task.c`） |
 | 接收 0x49B / TYPE 0x9B | **待同步**（均衡监控） |
-| 文档 | 底盘 `docs/BMS_CAN.md` 需补充 0x49A / 0x49B |
+| 充电命令 0x4A0 / 应答 0x4A1 | **待同步**（ROS Service 见 `docs/ROS_CHARGE.md`） |
 
 ---
 

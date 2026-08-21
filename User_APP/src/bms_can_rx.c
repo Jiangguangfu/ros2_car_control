@@ -4,6 +4,7 @@
  */
 #include "bms_can_rx.h"
 
+#include "bms_can_charge_cmd.h"
 #include "can_uart_transport.h"
 #include "lin_charger.h"
 #include "main.h"
@@ -51,6 +52,13 @@ void BMS_CanRx_Init(void)
     return;
   }
 
+  filter.FilterIndex = 1U;
+  filter.FilterID1 = CAN_UART_ID_CHARGE_CMD;
+  if (HAL_FDCAN_ConfigFilter(&hfdcan1, &filter) != HAL_OK)
+  {
+    return;
+  }
+
   (void)HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
                                      FDCAN_REJECT, FDCAN_REJECT,
                                      FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
@@ -69,30 +77,43 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     return;
   }
 
-  if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &hdr, data) != HAL_OK)
+  while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) > 0U)
   {
-    return;
-  }
+    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &hdr, data) != HAL_OK)
+    {
+      break;
+    }
 
-  if ((hdr.IdType != FDCAN_STANDARD_ID) ||
-      (hdr.Identifier != CAN_UART_ID_CHARGE_CTRL) ||
-      (data[1] != CAN_UART_CHARGE_CTRL_FRAG_TOTAL) ||
-      (data[0] != 0U))
-  {
-    return;
-  }
+    if (hdr.IdType != FDCAN_STANDARD_ID)
+    {
+      continue;
+    }
 
-  (void)memcpy(&cmd_pkt, &data[2], sizeof(cmd_pkt));
-  if (((cmd_pkt.cmd == UART_CHARGE_CTRL_STOP) &&
-       (cmd_pkt.i_target_ma != 0U)) ||
-      (((cmd_pkt.cmd == UART_CHARGE_CTRL_SET_CURRENT) ||
-        (cmd_pkt.cmd == UART_CHARGE_CTRL_START)) &&
-       !uart_charge_current_is_valid(cmd_pkt.i_target_ma)) ||
-      (cmd_pkt.cmd > UART_CHARGE_CTRL_STOP))
-  {
-    return;
+    if (hdr.Identifier == CAN_UART_ID_CHARGE_CMD)
+    {
+      BMS_CanChargeCmd_OnRx(data);
+      continue;
+    }
+
+    if ((hdr.Identifier != CAN_UART_ID_CHARGE_CTRL) ||
+        (data[1] != CAN_UART_CHARGE_CTRL_FRAG_TOTAL) ||
+        (data[0] != 0U))
+    {
+      continue;
+    }
+
+    (void)memcpy(&cmd_pkt, &data[2], sizeof(cmd_pkt));
+    if (((cmd_pkt.cmd == UART_CHARGE_CTRL_STOP) &&
+         (cmd_pkt.i_target_ma != 0U)) ||
+        (((cmd_pkt.cmd == UART_CHARGE_CTRL_SET_CURRENT) ||
+          (cmd_pkt.cmd == UART_CHARGE_CTRL_START)) &&
+         !uart_charge_current_is_valid(cmd_pkt.i_target_ma)) ||
+        (cmd_pkt.cmd > UART_CHARGE_CTRL_STOP))
+    {
+      continue;
+    }
+    bms_can_rx_queue(cmd_pkt.cmd, cmd_pkt.i_target_ma);
   }
-  bms_can_rx_queue(cmd_pkt.cmd, cmd_pkt.i_target_ma);
 }
 
 void BMS_CanRx_Process(void)

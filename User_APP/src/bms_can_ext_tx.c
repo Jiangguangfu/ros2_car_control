@@ -4,6 +4,7 @@
  */
 #include "bms_can_ext_tx.h"
 
+#include "bms_can_charge_cmd.h"
 #include "bms_ext_snapshot.h"
 #include "can_uart_transport.h"
 #include "main.h"
@@ -31,10 +32,8 @@ static void BMS_CanExtTx_RecoverIfBusOff(void)
   }
 
   (void)HAL_FDCAN_Stop(&hfdcan1);
+  BMS_CanChargeCmd_ApplyFilters();
   (void)HAL_FDCAN_Start(&hfdcan1);
-  (void)HAL_FDCAN_ConfigGlobalFilter(&hfdcan1,
-                                     FDCAN_REJECT, FDCAN_REJECT,
-                                     FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
 }
 
 static bool BMS_CanExtTx_WaitFifoFree(void)

@@ -6,6 +6,7 @@
  */
 #include "charge_manager.h"
 #include "charge_path.h"
+#include "charge_gate.h"
 #include "bsp_power_rails.h"
 #include "cell_balance_manager.h"
 #include "bq76942.h"
@@ -37,6 +38,22 @@ static uint8_t s_bq_protect_count;
 static uint8_t s_bq_protect_clear_count;
 static bool s_inited;
 static bool s_lin_charge_expect;
+static charge_gate_result_t s_last_reject;
+
+static void ChargeManager_StoreReject(const charge_gate_result_t *gate)
+{
+  if (gate == NULL)
+  {
+    s_last_reject.code = CHARGE_REJECT_NONE;
+    s_last_reject.mask = 0U;
+  }
+  else
+  {
+    s_last_reject = *gate;
+  }
+  s_status.last_reject = s_last_reject.code;
+  s_status.last_reject_mask = s_last_reject.mask;
+}
 
 static charge_fault_reason_t ChargeManager_MapPowerFault(
     const pwr_rails_status_t *pwr)
@@ -110,41 +127,6 @@ static void ChargeManager_EnterCompleted(void)
   ChargePath_SetChargeManagerInhibit(true);
   ChargePath_Apply();
   Balance_SetChargerPresent(true);
-}
-
-static bool ChargeManager_PreStartChecks(void)
-{
-  const bq76942_meas_t *meas = Bms_GetBqMeasurements();
-  const pwr_rails_status_t *thermal = BSP_PowerRails_GetStatus();
-  const uint32_t comm_fail = Bms_GetBqCommFailCount();
-
-  if ((meas == NULL) || (!meas->valid))
-  {
-    return false;
-  }
-
-  if (comm_fail >= CHARGE_COMM_FAIL_THRESHOLD)
-  {
-    return false;
-  }
-
-  if ((thermal != NULL) &&
-      ((thermal->state >= PWR_STATE_LIMIT) || (!thermal->sensor_ok)))
-  {
-    return false;
-  }
-
-  if (meas->vcell_min_mv < CHARGE_CELL_MIN_MV)
-  {
-    return false;
-  }
-
-  if (meas->vcell_max_mv >= CHARGE_CELL_MAX_SAFE_MV)
-  {
-    return false;
-  }
-
-  return true;
 }
 
 static bool ChargeManager_EnsureChargeFet(I2C_HandleTypeDef *hi2c)
@@ -416,33 +398,34 @@ void ChargeManager_SetLinChargeExpect(bool expect)
 
 bool ChargeManager_Start(void)
 {
-  if (s_status.state == CHARGE_STATE_CHARGING)
-  {
-    return true;
-  }
+  return ChargeManager_RequestStart(false);
+}
+
+bool ChargeManager_RequestStart(bool require_charger)
+{
+  charge_gate_result_t gate;
 
   if (s_status.state == CHARGE_STATE_FAULT)
   {
     if (!ChargeManager_ClearFault())
     {
+      ChargeGate_Evaluate(require_charger, &gate);
+      ChargeManager_StoreReject(&gate);
       return false;
     }
   }
 
-  if (s_status.state == CHARGE_STATE_COMPLETED)
-  {
-    const bq76942_meas_t *meas = Bms_GetBqMeasurements();
+  ChargeGate_Evaluate(require_charger, &gate);
+  ChargeManager_StoreReject(&gate);
 
-    if ((meas == NULL) || (!meas->valid) ||
-        (meas->vcell_max_mv >= CHARGE_CELL_FULL_EXIT_MV))
-    {
-      return false;
-    }
-  }
-
-  if (!ChargeManager_PreStartChecks())
+  if (gate.code != CHARGE_REJECT_NONE)
   {
     return false;
+  }
+
+  if (s_status.state == CHARGE_STATE_CHARGING)
+  {
+    return true;
   }
 
   s_status.state = CHARGE_STATE_CHARGING;
@@ -594,4 +577,19 @@ charge_state_t ChargeManager_GetState(void)
 charge_phase_t ChargeManager_GetPhase(void)
 {
   return s_status.phase;
+}
+
+const charge_gate_result_t *ChargeManager_GetLastReject(void)
+{
+  return &s_last_reject;
+}
+
+void ChargeManager_ClearLastReject(void)
+{
+  ChargeManager_StoreReject(NULL);
+}
+
+void ChargeManager_SetLastReject(const charge_gate_result_t *gate)
+{
+  ChargeManager_StoreReject(gate);
 }

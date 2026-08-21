@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/bms_can_rx.c
     User_APP/src/bms_can_ext_tx.c
     User_APP/src/bms_can_balance_tx.c
+    User_APP/src/bms_can_charge_cmd.c
     User_APP/src/bms_data_snapshot.c
     User_APP/src/bms_ext_snapshot.c
     User_APP/src/bms_balance_snapshot.c
@@ -67,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     User_APP/src/bsp_adc_rails.c
     User_APP/src/cell_balance_manager.c
     User_APP/src/charge_path.c
+    User_APP/src/charge_gate.c
     User_APP/src/charge_manager.c
     User_APP/src/cell_voltage_protect.c
     User_APP/src/lin_charger.c
