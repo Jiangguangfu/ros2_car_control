@@ -717,14 +717,17 @@ static bool BQ76942_WriteVcellMode(I2C_HandleTypeDef *hi2c, uint16_t mode)
   return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_VCELL_MODE, block, 2U);
 }
 
-static bool BQ76942_WriteSleepCurrent(I2C_HandleTypeDef *hi2c,
-                                      uint16_t sleep_current_ma)
+static bool BQ76942_WriteSleepConfig(I2C_HandleTypeDef *hi2c,
+                                     uint16_t sleep_current_ma,
+                                     uint8_t voltage_time_s)
 {
-  uint8_t block[2];
+  uint8_t block[3];
 
   block[0] = (uint8_t)(sleep_current_ma & 0xFFU);
   block[1] = (uint8_t)((sleep_current_ma >> 8) & 0xFFU);
-  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_SLEEP_CURRENT, block, 2U);
+  block[2] = voltage_time_s;
+  return BQ76942_DataMemoryWrite(hi2c, BQ76942_DM_SLEEP_CURRENT,
+                                 block, (uint8_t)sizeof(block));
 }
 
 static bool BQ76942_WriteFetPredischargeConfig(I2C_HandleTypeDef *hi2c);
@@ -761,7 +764,8 @@ bool BQ76942_InitCalibration(I2C_HandleTypeDef *hi2c)
   ok = BQ76942_WriteVdivOffset(hi2c, (int16_t)BQ76942_Vdiv_OFFSET_VALUE);
   ok = ok && BQ76942_WriteCcGain(hi2c, cc_gain);
   ok = ok && BQ76942_WriteVcellMode(hi2c, BQ76942_VCELL_MODE);
-  ok = ok && BQ76942_WriteSleepCurrent(hi2c, BQ76942_SLEEP_CURRENT_MA);
+  ok = ok && BQ76942_WriteSleepConfig(hi2c, BQ76942_SLEEP_CURRENT_MA,
+                                      BQ76942_SLEEP_VOLTAGE_TIME_S);
   ok = ok && BQ76942_WriteProtectionConfig(hi2c);
   ok = ok && BQ76942_WriteTs2Config(hi2c, BQ76942_TS2_CONFIG_REPORT_ONLY);
   ok = ok && BQ76942_WriteFetPredischargeConfig(hi2c);

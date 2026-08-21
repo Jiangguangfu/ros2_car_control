@@ -77,8 +77,8 @@ static bool soh_inputs_resting(const bq76942_meas_t *meas)
     return false;
   }
 
-  return (meas->current_ma <= SOH_REST_CURRENT_MA) &&
-         (meas->current_ma >= -SOH_REST_CURRENT_MA);
+  return (meas->current_cc1_ma <= SOH_REST_CURRENT_MA) &&
+         (meas->current_cc1_ma >= -SOH_REST_CURRENT_MA);
 }
 
 static uint8_t Soh_EvalCapacitySoh(void)
@@ -172,7 +172,7 @@ static bool Soh_IsAtFull(const bq76942_meas_t *meas, charge_state_t charge_state
   }
 
   return (meas->vcell_max_mv >= SOH_CAP_FULL_CELL_MV) &&
-         (meas->current_ma < SOH_CAP_TAPER_MA);
+         (meas->current_cc1_ma < SOH_CAP_TAPER_MA);
 }
 
 static bool Soh_IsAtEmpty(const bq76942_meas_t *meas)
@@ -270,9 +270,9 @@ static void Soh_CapacityLearnProcess(const soh_inputs_t *inputs, uint32_t period
 
   at_full = Soh_IsAtFull(meas, inputs->charge_state);
   at_empty = Soh_IsAtEmpty(meas);
-  charging = (meas->current_ma > SOH_CAP_FLOW_MA) ||
+  charging = (meas->current_cc1_ma > SOH_CAP_FLOW_MA) ||
              (inputs->charge_state == CHARGE_STATE_CHARGING);
-  discharging = meas->current_ma < -SOH_CAP_FLOW_MA;
+  discharging = meas->current_cc1_ma < -SOH_CAP_FLOW_MA;
 
   switch (s_learn_phase)
   {
@@ -301,7 +301,7 @@ static void Soh_CapacityLearnProcess(const soh_inputs_t *inputs, uint32_t period
 
       if (discharging)
       {
-        Soh_LearnIntegrate((int16_t)(-meas->current_ma), period_ms);
+        Soh_LearnIntegrate((int16_t)(-meas->current_cc1_ma), period_ms);
       }
 
       if (at_empty)
@@ -320,7 +320,7 @@ static void Soh_CapacityLearnProcess(const soh_inputs_t *inputs, uint32_t period
 
       if (charging)
       {
-        Soh_LearnIntegrate(meas->current_ma, period_ms);
+        Soh_LearnIntegrate(meas->current_cc1_ma, period_ms);
       }
 
       if (at_full ||

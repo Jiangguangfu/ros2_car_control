@@ -68,8 +68,8 @@ extern "C" {
 #define BQ76942_DASTATUS5_CC1_OFFSET      22U
 
 /* Battery Status bits. */
-#define BQ76942_BATTERY_STATUS_SLEEP      (1U << 15)
-#define BQ76942_BATTERY_STATUS_SLEEP_EN   (1U << 2)
+#define BQ76942_BATTERY_STATUS_SLEEP      (1U << 15)/*指示当前是否处于SLEEP模式*/
+#define BQ76942_BATTERY_STATUS_SLEEP_EN   (1U << 2)/*指示当前是否允许进入SLEEP模式*/
 
 /* Data memory: Calibration:Current (IEEE-754 F4, little-endian). */
 #define BQ76942_DM_CC_GAIN                0x91A8U
@@ -80,8 +80,16 @@ extern "C" {
 
 /* Power:Sleep:Sleep Current (I2, mA). */
 #define BQ76942_DM_SLEEP_CURRENT          0x9248U
+#define BQ76942_DM_SLEEP_VOLTAGE_TIME     0x924AU
 #ifndef BQ76942_SLEEP_CURRENT_MA
 #define BQ76942_SLEEP_CURRENT_MA          20U
+#endif
+#ifndef BQ76942_SLEEP_VOLTAGE_TIME_S
+#define BQ76942_SLEEP_VOLTAGE_TIME_S      5U
+#endif
+#if (BQ76942_SLEEP_VOLTAGE_TIME_S < 1U) || \
+    (BQ76942_SLEEP_VOLTAGE_TIME_S > 255U)
+#error "BQ76942_SLEEP_VOLTAGE_TIME_S must be 1..255 seconds"
 #endif
 
 /* ReadMeasurements 输出一阶 IIR：新值 = 旧值 + (采样值-旧值)/2^N。 */

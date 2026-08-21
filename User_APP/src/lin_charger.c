@@ -53,7 +53,7 @@ static void lin_touch_master(uint32_t now_ms)
     ChargePath_SetLinCommInhibit(false);
   }
 }
-
+/*计算当前允许的充电电流*/
 static uint16_t lin_compute_i_limit_ma(void)
 {
   const pwr_rails_status_t *pwr = BSP_PowerRails_GetStatus();

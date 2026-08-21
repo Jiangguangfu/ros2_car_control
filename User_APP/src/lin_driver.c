@@ -41,7 +41,7 @@ static const lin_frame_map_t s_frame_map[] = {
 
 static lin_drv_state_t s_state;
 static uint8_t s_rx_pid;
-static uint8_t s_master_buf[9];
+static uint8_t s_master_buf[9]; //接收数据
 static uint8_t s_master_len;
 static uint8_t s_master_rx_total;
 static uint8_t s_master_idx;
@@ -176,19 +176,19 @@ static void lin_idle_rx_enable(void)
     __HAL_UART_ENABLE_IT(&huart1, UART_IT_RXNE);
   }
 }
-
+/*关掉IDLE的RXNE监听*/
 static void lin_idle_rx_disable(void)
 {
   __HAL_UART_DISABLE_IT(&huart1, UART_IT_RXNE);
 }
-
+/*重新听下一帧break*/
 static void lin_go_idle(void)
 {
   s_after_sync = false;
   s_state = LIN_DRV_IDLE;
   lin_idle_rx_enable();
 }
-
+/*用帧表决定下一步继续收Master数据还是立刻Slave回答*/
 static void lin_begin_master_frame(const lin_frame_map_t *frame, uint8_t pid)
 {
   s_rx_pid = pid;
@@ -197,13 +197,14 @@ static void lin_begin_master_frame(const lin_frame_map_t *frame, uint8_t pid)
   s_master_idx = 0U;
   s_master_rx_total = (uint8_t)(s_master_len + ((s_master_len > 0U) ? 1U : 0U));
   s_after_sync = false;
-
-  if (s_master_rx_total > 0U)
+   /*Master还带数据*/
+  if (s_master_rx_total > 0U)    
   {
     s_state = LIN_DRV_RX_MASTER;
     lin_arm_rx_master();
   }
-  else if (s_slave_len > 0U)
+  
+  else if (s_slave_len > 0U)     
   {
     lin_start_slave_tx();
   }
@@ -272,7 +273,7 @@ static void lin_service_idle_rx(void)
     lin_on_break();
   }
 }
-
+/*关掉 IDLE 的 RXNE 监听*/
 static void lin_arm_rx_master(void)
 {
   lin_idle_rx_disable();
