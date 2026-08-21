@@ -20,6 +20,9 @@ void BMS_CanChargeCmd_OnRx(const uint8_t *data);
 /** CommTask 周期调用：收 0x4A0，回 0x4A1 */
 void BMS_CanChargeCmd_Process(void);
 
+/** 电流确认变化时补发 0x4A1（命令成功 ≠ 正在充电） */
+void BMS_CanChargeCmd_PublishStatus(void);
+
 #ifdef __cplusplus
 }
 #endif

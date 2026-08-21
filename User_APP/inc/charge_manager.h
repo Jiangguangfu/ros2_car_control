@@ -62,6 +62,8 @@ typedef struct
   bool chg_fet_on;
   bool charge_allowed;        /* CFET 路径未被 thermal/imbalance/manager 阻断 */
   bool charge_paused;         /* 充电中但被 thermal/imbalance 暂停 */
+  bool current_confirmed;     /* pack 充电电流已超过检测门限 */
+  bool no_current_after_ack;  /* ACK 后观察窗结束仍无流 */
 
   uint16_t vcell_min_mv;
   uint16_t vcell_max_mv;

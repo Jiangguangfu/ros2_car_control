@@ -9,6 +9,7 @@
 #include "soc_estimator.h"
 #include "soh_estimator.h"
 #include "bsp_power_rails.h"
+#include "charge_manager.h"
 
 static float bms_snapshot_temp_c(const bq76942_temp_t *temp)
 {
@@ -101,6 +102,27 @@ void BmsDataSnapshot_Fill(uart_battery_state_report_t *out)
       out->current_a = -(float)meas->current_ma / 1000.0f;
     }
     out->reserved1 = BMS_BATTERY_REPORT_VALID_BIT;
+  }
+
+  {
+    const charge_status_t *chg = ChargeManager_GetStatus();
+
+    if ((chg != NULL) && chg->user_start_request)
+    {
+      out->reserved1 = (uint8_t)(out->reserved1 | BMS_BATTERY_REPORT_CHG_ENABLE);
+      if (chg->current_confirmed)
+      {
+        out->reserved1 = (uint8_t)(out->reserved1 | BMS_BATTERY_REPORT_CHG_CURRENT);
+      }
+      else if (chg->no_current_after_ack)
+      {
+        out->reserved1 = (uint8_t)(out->reserved1 | BMS_BATTERY_REPORT_CHG_NO_FLOW);
+      }
+      else if ((chg->state == CHARGE_STATE_CHARGING) && (!chg->charge_paused))
+      {
+        out->reserved1 = (uint8_t)(out->reserved1 | BMS_BATTERY_REPORT_CHG_WAITING);
+      }
+    }
   }
 
   out->temperature_c = bms_snapshot_temp_c(temp);

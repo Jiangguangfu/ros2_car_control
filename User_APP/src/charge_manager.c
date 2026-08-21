@@ -89,8 +89,10 @@ static void ChargeManager_SetFault(charge_fault_reason_t reason)
   s_status.state = CHARGE_STATE_FAULT;
   s_status.phase = CHARGE_PHASE_NONE;
   s_status.fault_reason = reason;
-  s_status.user_start_request = false;
+  s_status.user_start_request = (reason == CHARGE_FAULT_NO_CURRENT);
   s_status.charge_paused = false;
+  s_status.current_confirmed = false;
+  s_status.no_current_after_ack = (reason == CHARGE_FAULT_NO_CURRENT);
   s_status.cv_taper_count = 0U;
   s_bq_protect_clear_count = 0U;
   ChargePath_SetChargeManagerInhibit(true);
@@ -105,6 +107,8 @@ static void ChargeManager_EnterIdle(void)
   s_status.fault_reason = CHARGE_FAULT_NONE;
   s_status.user_start_request = false;
   s_status.charge_paused = false;
+  s_status.current_confirmed = false;
+  s_status.no_current_after_ack = false;
   s_status.cv_taper_count = 0U;
   s_status.charge_elapsed_ms = 0U;
   s_phase_enter_ms = 0U;
@@ -123,6 +127,8 @@ static void ChargeManager_EnterCompleted(void)
   s_status.fault_reason = CHARGE_FAULT_NONE;
   s_status.user_start_request = false;
   s_status.charge_paused = false;
+  s_status.current_confirmed = false;
+  s_status.no_current_after_ack = false;
   s_status.cv_taper_count = 0U;
   ChargePath_SetChargeManagerInhibit(true);
   ChargePath_Apply();
@@ -323,6 +329,16 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
     return;
   }
 
+  if (s_status.pack_current_ma >= CHARGE_CC_DETECT_CURRENT_MA)
+  {
+    s_status.current_confirmed = true;
+    s_status.no_current_after_ack = false;
+    if (s_last_reject.code == CHARGE_REJECT_NO_CURRENT)
+    {
+      ChargeManager_StoreReject(NULL);
+    }
+  }
+
   if (s_status.phase == CHARGE_PHASE_CC)
   {
     if (s_status.vcell_max_mv >= CHARGE_CELL_CV_ENTER_MV)
@@ -338,12 +354,21 @@ static void ChargeManager_ProcessCharging(I2C_HandleTypeDef *hi2c)
     }
     else if (s_start_debounce >= CHARGE_START_DEBOUNCE)
     {
-      /* LIN 桩在 BMS 报 CHARGING 之后才启动 BQ25756，不能按实验室电源立刻判无流。 */
-      if ((!s_lin_charge_expect) &&
+      if ((!s_status.current_confirmed) &&
           (s_status.pack_current_ma < CHARGE_CC_DETECT_CURRENT_MA))
       {
-        ChargeManager_SetFault(CHARGE_FAULT_NO_CURRENT);
-        return;
+        charge_gate_result_t gate;
+
+        s_status.no_current_after_ack = true;
+        gate.code = CHARGE_REJECT_NO_CURRENT;
+        gate.mask = CHG_INH_NO_CURRENT;
+        ChargeManager_StoreReject(&gate);
+        /* 实验室电源无 LIN：无流判故障。充电桩：保持使能，上报「开关开了但没充上」。 */
+        if (!s_lin_charge_expect)
+        {
+          ChargeManager_SetFault(CHARGE_FAULT_NO_CURRENT);
+          return;
+        }
       }
     }
     else
@@ -433,6 +458,8 @@ bool ChargeManager_RequestStart(bool require_charger)
   s_status.fault_reason = CHARGE_FAULT_NONE;
   s_status.user_start_request = true;
   s_status.charge_paused = false;
+  s_status.current_confirmed = false;
+  s_status.no_current_after_ack = false;
   s_status.cv_taper_count = 0U;
   s_status.charge_elapsed_ms = 0U;
   s_phase_enter_ms = osKernelGetTickCount();

@@ -43,6 +43,7 @@ extern "C" {
 #define BMS_EXT_ALARM_LOW_BATTERY      (1u << 12)
 #define BMS_EXT_ALARM_BALANCING        (1u << 13)
 #define BMS_EXT_ALARM_DELTA_HIGH       (1u << 14)
+#define BMS_EXT_ALARM_CHG_NO_CURRENT   (1u << 15)  /* 命令已接受但无充电电流 */
 
 typedef struct __attribute__((packed)) {
   uint32_t alarm_flags;

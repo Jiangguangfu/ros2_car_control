@@ -67,7 +67,7 @@ Byte 2–7 payload 连续 6 字节
 | 0 | `series_cells` | uint8 | 串联节数（6S = 6） |
 | 1 | `present` | uint8 | 1 = 电池存在 |
 | 2 | `reserved0` | uint8 | SOH 0~100（容量衰减：实测满充 / 标称；未学习前默认 **100**） |
-| 3 | `reserved1` | uint8 | bit0 = `BMS_BATTERY_REPORT_VALID_BIT`（BMS CAN 数据有效） |
+| 3 | `reserved1` | uint8 | bit0 数据有效；**bit1 充电使能**；**bit2 电流已确认**；**bit3 等待出流**；**bit4 开关开了但无流** |
 | 4–7 | `voltage_v` | float | 包电压（V），来自 BQ Stack `pack_mv` / 回退逻辑 |
 | 8–11 | `current_a` | float | 电流（A），**放电为正** |
 | 12–15 | `percentage` | float | SOC **0.0~1.0**；未知时为 **-1.0** |
@@ -127,6 +127,7 @@ Byte 2–7 payload 连续 6 字节
 | 10 | `BMS_EXT_ALARM_CHARGE_FAULT` | 充电状态机故障 |
 | 13 | `BMS_EXT_ALARM_BALANCING` | 正在泄放（`ACTIVE` 或 `MID_PROTECT`），不抬升 severity |
 | 14 | `BMS_EXT_ALARM_DELTA_HIGH` | 顶部窗口且 Δ > 15 mV（中段不置位） |
+| 15 | `BMS_EXT_ALARM_CHG_NO_CURRENT` | 充电命令已接受但观察窗后仍无充电电流 |
 
 **severity**：有关键告警（BQ 保护、充电故障、过温）时为 **CRITICAL(2)**，其余为 **WARN(1)**。`BALANCING` 单独置位不改变 severity。
 
@@ -211,9 +212,11 @@ RTT 一行示例：`BAL top TOP d=42 msk=0x05 inh=0 mid=0 f=0x19 BLEED`
 
 ## 0x4A0 / 0x4A1 — 充电命令与安全仲裁应答
 
-**流程**：用户（ROS）发开充/停充 → BMS 安全仲裁 → 通过则充电；失败则 **0xA1 带回主因 `reject_code` + `inhibit_mask`**。停充不仲裁，立即 `Stop()`。
+**流程**：用户发开充 → BMS 仲裁 ACK（`accepted`）→ **再观察充电电流**（约 10 s）。`charging` 仅在电流确认后置位。超时无流则 `NO_FLOW` + `reject_code=14`，表示「开关开了但没充上」（接触不良 / 桩没电等）。预充窗口内为 `WAITING`，不是失败。
 
 ROS 开充要求 LIN 已完成 V/I 协商（`session >= VI_OK`）且未丢帧。
+
+电流确认门限与 407 一致：BQ 充电电流 ≥ 50 mA ⇔ 协议 `current_a` ≤ **-0.05 A**。
 
 ### 0x4A0 CMD（底板 → BMS，单帧 8 B）
 
@@ -229,9 +232,9 @@ ROS 开充要求 LIN 已完成 V/I 协商（`session >= VI_OK`）且未丢帧。
 | 偏移 | 字段 | 说明 |
 |------|------|------|
 | 0 | `cmd` | 回显 |
-| 1 | `flags` | bit0 `accepted`，bit1 `charging`，bit2 `paused` |
+| 1 | `flags` | bit0 `accepted`（命令成功）；bit1 `charging`（**电流已确认**）；bit2 `paused`；bit3 `waiting`（ACK 后等出流）；bit4 `no_flow`（开关开了但没充上） |
 | 2–3 | `request_id` | 回显 LE |
-| 4 | `reject_code` | `charge_reject_t`，accepted 时为 0 |
+| 4 | `reject_code` | 闸门失败或事后无流（14）；电流确认后为 0 |
 | 5 | `state` | `charge_state_t` |
 | 6–7 | `inhibit_mask` | LE，`CHG_INH_*` |
 

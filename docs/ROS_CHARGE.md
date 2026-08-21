@@ -38,7 +38,20 @@ uint8 state
 | 10 | LIN 丢帧 |
 | 11 | 充电桩未就绪（未 V/I 协商或无桩） |
 | 12 | 充电故障未恢复 |
-| 13 | BQ Safety 锁存 |
+| 14 | 命令已接受但超时无充电电流（接触不良 / 桩没电等） |
+
+## 命令成功 ≠ 正在充电
+
+Service 立刻返回的 `accepted` 只表示 BMS 仲裁通过、开关已开。`charging` 要等充电电流 ≥ 50 mA（`current_a` ≤ -0.05）。
+
+| 阶段 | 0x4A1 flags | 0x48B reserved1 | 建议 ROS `power_supply_status` |
+|------|-------------|-----------------|--------------------------------|
+| ACK 后 ~10 s 内等出流 | `accepted` + `waiting` | bit1 + bit3 | 可保持 UNKNOWN，或显示「启动中」 |
+| 电流已确认 | `accepted` + `charging` | bit1 + bit2 | `CHARGING` |
+| 超时仍无流 | `accepted` + `no_flow`，`reject_code=14` | bit1 + bit4 | `NOT_CHARGING`，文案「开关开了但没充上」 |
+| 已满电闸门拒绝 | `accepted=false`，`reject_code=1` | 无 bit1 | `FULL` / `NOT_CHARGING` |
+
+底板应 **订阅 0x4A1 变化**（以及 0x48B 5 Hz），不要只靠用户 `echo /battery_state`。0x49A 告警位 `CHG_NO_CURRENT` 会在无流时立即上报。
 
 ## 命令示例
 
@@ -68,7 +81,8 @@ ros2 service call /bms/charge_query bms_msgs/srv/ChargeEnable "{enable: false, r
 ros2 topic echo /bms/charge_status
 ```
 
-成功：`accepted: true` 且 `charging: true`。  
-失败：`accepted: false`，读 `reject_code`（BMS 仲裁原因，不是底板自己编的）。
+成功：`accepted: true` 只表示命令通过。正在充电还需 `charging: true`（或 0x48B bit2 / `current_a <= -0.05`）。  
+若 `accepted: true` 且随后 `no_flow` / `reject_code: 14`：开关已开但没充上。  
+闸门失败：`accepted: false`，读 `reject_code`。
 
 底板未实现 Service 时，可用 CAN 工具发 0x4A0：`01 00 01 00 00 00 00 00`（START，request_id=1）。

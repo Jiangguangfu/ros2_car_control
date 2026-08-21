@@ -236,6 +236,7 @@ void StartCommonTaskCommon(void *argument)
     BMS_CanRx_Process();
 #endif
     BMS_CanChargeCmd_Process();
+    BMS_CanChargeCmd_PublishStatus();
 #if BMS_LIN_DIAG_TX_ENABLE
     LinDiagTx_Poll();
 #endif

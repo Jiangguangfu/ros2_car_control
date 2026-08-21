@@ -27,7 +27,8 @@ typedef enum
   CHARGE_REJECT_LIN_COMM,       /* LIN 丢帧暂停 */
   CHARGE_REJECT_LIN_NOT_READY,  /* 未握手或无桩 */
   CHARGE_REJECT_FAULT,          /* 状态机故障且不可恢复 */
-  CHARGE_REJECT_BQ_PROTECT      /* BQ Safety 锁存 */
+  CHARGE_REJECT_BQ_PROTECT,     /* BQ Safety 锁存 */
+  CHARGE_REJECT_NO_CURRENT      /* 命令已接受但超时无充电电流 */
 } charge_reject_t;
 
 #define CHG_INH_THERMAL     (1u << 0)
@@ -40,6 +41,7 @@ typedef enum
 #define CHG_INH_FULL        (1u << 7)
 #define CHG_INH_FAULT       (1u << 8)
 #define CHG_INH_LIN_SESSION (1u << 9)
+#define CHG_INH_NO_CURRENT  (1u << 10)
 
 typedef struct
 {

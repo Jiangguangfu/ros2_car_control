@@ -18,13 +18,19 @@ extern FDCAN_HandleTypeDef hfdcan1;
 #define BMS_CAN_CHG_CMD_QUERY   2u
 
 #define BMS_CAN_CHG_FLAG_ACCEPTED  (1u << 0)
-#define BMS_CAN_CHG_FLAG_CHARGING  (1u << 1)
+#define BMS_CAN_CHG_FLAG_CHARGING  (1u << 1)  /* 已确认充电电流 */
 #define BMS_CAN_CHG_FLAG_PAUSED    (1u << 2)
+#define BMS_CAN_CHG_FLAG_WAITING   (1u << 3)  /* ACK 后等待出流 */
+#define BMS_CAN_CHG_FLAG_NO_FLOW   (1u << 4)  /* 开关开了但没充上 */
 
 #define BMS_CAN_TX_FIFO_WAIT_MS  10U
 
 static uint8_t s_rx_data[8];
 static volatile bool s_rx_pending;
+static uint8_t s_last_cmd;
+static uint16_t s_last_request_id;
+static uint8_t s_last_pub_flags;
+static uint8_t s_last_pub_reject;
 
 void BMS_CanChargeCmd_OnRx(const uint8_t *data)
 {
@@ -89,12 +95,21 @@ static void BMS_CanChargeCmd_SendRsp(uint8_t cmd, uint16_t request_id,
   uint8_t flags = 0U;
   bool charging = false;
   bool paused = false;
+  bool waiting = false;
+  bool no_flow = false;
 
   if (chg != NULL)
   {
     paused = chg->charge_paused;
-    charging = (chg->state == CHARGE_STATE_CHARGING) && (!paused) &&
-               chg->charge_allowed;
+    charging = chg->current_confirmed;
+    no_flow = chg->no_current_after_ack;
+    waiting = (chg->user_start_request != false) &&
+              (chg->state == CHARGE_STATE_CHARGING) &&
+              (!charging) && (!no_flow) && (!paused);
+    if (chg->user_start_request)
+    {
+      accepted = true;
+    }
   }
 
   if (accepted)
@@ -108,6 +123,14 @@ static void BMS_CanChargeCmd_SendRsp(uint8_t cmd, uint16_t request_id,
   if (paused)
   {
     flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_PAUSED);
+  }
+  if (waiting)
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_WAITING);
+  }
+  if (no_flow)
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_NO_FLOW);
   }
 
   (void)memset(data, 0, sizeof(data));
@@ -123,10 +146,8 @@ static void BMS_CanChargeCmd_SendRsp(uint8_t cmd, uint16_t request_id,
     data[7] = (uint8_t)((rej->mask >> 8) & 0xFFU);
   }
 
-  if (accepted)
-  {
-    data[4] = (uint8_t)CHARGE_REJECT_NONE;
-  }
+  s_last_pub_flags = flags;
+  s_last_pub_reject = data[4];
 
   if (!BMS_CanChargeCmd_WaitFifoFree())
   {
@@ -176,12 +197,67 @@ static void BMS_CanChargeCmd_Handle(const uint8_t *data)
     accepted = false;
   }
 
+  s_last_cmd = cmd;
+  s_last_request_id = request_id;
   BMS_CanChargeCmd_SendRsp(cmd, request_id, accepted);
 }
 
 void BMS_CanChargeCmd_Init(void)
 {
   BMS_CanChargeCmd_ApplyFilters();
+}
+
+void BMS_CanChargeCmd_PublishStatus(void)
+{
+  const charge_status_t *chg = ChargeManager_GetStatus();
+  const charge_gate_result_t *rej = ChargeManager_GetLastReject();
+  uint8_t flags = 0U;
+  uint8_t reject = 0U;
+
+  if (chg == NULL)
+  {
+    return;
+  }
+
+  if (chg->user_start_request)
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_ACCEPTED);
+  }
+  if (chg->current_confirmed)
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_CHARGING);
+  }
+  if (chg->charge_paused)
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_PAUSED);
+  }
+  if (chg->user_start_request && (chg->state == CHARGE_STATE_CHARGING) &&
+      (!chg->current_confirmed) && (!chg->no_current_after_ack) &&
+      (!chg->charge_paused))
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_WAITING);
+  }
+  if (chg->no_current_after_ack)
+  {
+    flags = (uint8_t)(flags | BMS_CAN_CHG_FLAG_NO_FLOW);
+  }
+  if (rej != NULL)
+  {
+    reject = (uint8_t)rej->code;
+  }
+
+  if ((flags == s_last_pub_flags) && (reject == s_last_pub_reject))
+  {
+    return;
+  }
+
+  if (chg->user_start_request && (s_last_cmd != BMS_CAN_CHG_CMD_START))
+  {
+    s_last_cmd = BMS_CAN_CHG_CMD_START;
+  }
+
+  BMS_CanChargeCmd_SendRsp(s_last_cmd, s_last_request_id,
+                           chg->user_start_request != false);
 }
 
 void BMS_CanChargeCmd_Process(void)

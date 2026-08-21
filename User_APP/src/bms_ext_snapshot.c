@@ -158,6 +158,9 @@ void BmsExtSnapshot_Fill(uart_battery_ext_report_t *out)
         alarm = (uint32_t)(alarm | BMS_EXT_ALARM_IMBALANCE_CHG);
       }
     }
+    if (charge->no_current_after_ack) {
+      alarm = (uint32_t)(alarm | BMS_EXT_ALARM_CHG_NO_CURRENT);
+    }
   }
 
   if (balance != NULL) {
